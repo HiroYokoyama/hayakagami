@@ -146,7 +146,9 @@ fn the_appended_state_agrees_with_a_full_scan() {
 fn changes_after_many_appends_are_still_mirrored() {
     let f = Fixture::seeded(5);
     for round in 0..20 {
-        f.edit(round % 5, &format!("round {round} with some more text"));
+        // A different size each time: within 2 seconds, a file of the same size and
+        // time counts as unchanged on macOS and Linux.
+        f.edit(round % 5, &"edited".repeat(round + 2));
         f.run();
     }
     fs::remove_file(f.source.join("folder1/file3.txt")).unwrap();
