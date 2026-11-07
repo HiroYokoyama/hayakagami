@@ -94,6 +94,8 @@ struct App {
     journal_remote: Option<RemoteHandle>,
     /// The permission prompt was declined, so it is not shown again in this window.
     journal_declined: bool,
+    about_open: bool,
+    about_icon: Option<egui::TextureHandle>,
 }
 
 fn load_fonts(ctx: &egui::Context) {
@@ -404,6 +406,8 @@ impl App {
             excludes_text: String::new(),
             dirty_since: None,
             job_started: Instant::now(),
+            about_icon: None,
+            about_open: false,
             full_check: false,
             allow_guarded: false,
             plans: None,
@@ -725,7 +729,54 @@ impl App {
                 section_title(ui, tr("PATTERN FILES", "パターンファイル"));
                 self.file_type_buttons(ui);
             }
+            ui.separator();
+            if ui
+                .button(tr("About Hayakagami", "Hayakagami について"))
+                .clicked()
+            {
+                self.about_open = true;
+                ui.close();
+            }
         });
+    }
+
+    fn about_dialog(&mut self, ui_ctx: &egui::Context) {
+        if !self.about_open {
+            return;
+        }
+        let icon = self.about_icon.get_or_insert_with(|| {
+            let icon = app_icon();
+            let size = [icon.width as usize, icon.height as usize];
+            ui_ctx.load_texture(
+                "about-icon",
+                egui::ColorImage::from_rgba_unmultiplied(size, &icon.rgba),
+                egui::TextureOptions::LINEAR,
+            )
+        });
+        let modal = egui::Modal::new(egui::Id::unique("about")).show(ui_ctx, |ui| {
+            ui.set_width(360.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::Image::new(&*icon).fit_to_exact_size(egui::vec2(48.0, 48.0)));
+                ui.heading(concat!("Hayakagami ", env!("CARGO_PKG_VERSION")));
+            });
+            ui.add_space(4.0);
+            ui.label(tr(
+                "Folder-based mirror backup that avoids rescanning the destination.",
+                "保存先を毎回調べ直さない、フォルダ単位のミラーバックアップです。",
+            ));
+            ui.add_space(8.0);
+            ui.label(trf!(
+                "License: {}",
+                "ライセンス: {}",
+                env!("CARGO_PKG_LICENSE")
+            ));
+            ui.hyperlink(env!("CARGO_PKG_REPOSITORY"));
+            ui.add_space(8.0);
+            ui.button(tr("Close", "閉じる")).clicked()
+        });
+        if modal.inner || modal.should_close() {
+            self.about_open = false;
+        }
     }
 
     fn file_type_buttons(&mut self, ui: &mut egui::Ui) {
@@ -975,6 +1026,8 @@ impl App {
 
     fn tab_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            // Clearly wider than a word space, so that a two-word label reads as one tab.
+            ui.spacing_mut().item_spacing.x = 24.0;
             for (tab, label) in [
                 (Tab::Run, tr("Run", "実行")),
                 (Tab::Settings, tr("Pattern settings", "パターン設定")),
@@ -1169,6 +1222,7 @@ impl App {
         ui.add_space(6.0);
         egui::CollapsingHeader::new(trf!("Log ({})", "ログ ({})", self.log.len()))
             .id_salt("log")
+            .default_open(true)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("log-lines")
@@ -1512,6 +1566,7 @@ impl eframe::App for App {
             }
         }
 
+        self.about_dialog(&ui_ctx);
         egui::Panel::left("patterns")
             .default_size(180.0)
             .resizable(false)
@@ -1554,6 +1609,11 @@ impl eframe::App for App {
     }
 }
 
+fn app_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon-256.png"))
+        .expect("the bundled icon is a valid PNG")
+}
+
 fn main() -> eframe::Result {
     let mut args = std::env::args_os().skip(1);
     let file = args.next();
@@ -1564,13 +1624,10 @@ fn main() -> eframe::Result {
     let file = file.map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Hayakagami")
+            .with_title(concat!("Hayakagami ", env!("CARGO_PKG_VERSION")))
             .with_inner_size([980.0, 720.0])
             .with_min_inner_size([720.0, 520.0])
-            .with_icon(Arc::new(
-                eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon-256.png"))
-                    .expect("the bundled icon is a valid PNG"),
-            )),
+            .with_icon(Arc::new(app_icon())),
         ..Default::default()
     };
     eframe::run_native(
