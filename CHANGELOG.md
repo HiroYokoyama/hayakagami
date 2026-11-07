@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.3.3
+## 0.4.0
 
 ### Added
 
+- An optional check of the destination disk, for each folder pair, under **Advanced** in the pattern settings. A run or preview stops before reading anything if the destination is on another disk or the disk is not connected. Windows and Linux tell disks apart by ID, and macOS by name.
 - The version in the title bar of the desktop app.
 - An About dialog under Preferences, with the icon, version, license and a link to the GitHub repository.
 

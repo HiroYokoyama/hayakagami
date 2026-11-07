@@ -107,6 +107,12 @@ Start `hayakagami-gui` and create a pattern. A pattern is a named set of folder 
 2. On the **Run** tab, press **Preview** to review the plan.
 3. Press **Run this plan**, or **Run** to skip the preview.
 
+### Destination disk check
+
+Under **Advanced** in the pattern settings, turn on the disk check for a folder pair to remember the disk connected now. A run or preview then stops if the destination is on another disk or the disk is not connected, even when the drive letter is the same.
+
+Windows and Linux tell disks apart by ID (the volume serial number and the file system UUID), so renaming a disk is fine, but formatting it changes the ID. macOS compares the volume name only, so two disks with the same name count as one. After replacing a disk, turn the check off and on again.
+
 ### Pattern files
 
 **Save as file** stores a pattern as a `.hkgm` file. On the command line, use `hayakagami run <file>.hkgm`.
