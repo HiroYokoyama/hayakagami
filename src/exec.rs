@@ -21,6 +21,7 @@ use std::sync::Mutex;
 pub struct Report {
     pub copied: u64,
     pub copied_bytes: u64,
+    pub links: u64,
     pub deleted: u64,
     pub errors: u64,
     pub scan_errors: u64,
@@ -31,6 +32,7 @@ struct Shared<'a> {
     evict: Mutex<HashSet<PathBuf>>,
     disk_full: AtomicBool,
     counter: AtomicU64,
+    links_done: AtomicU64,
 }
 
 impl Shared<'_> {
@@ -112,6 +114,29 @@ fn remove_dirs(root: &Path, dirs: &[PathBuf], shared: &Shared) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty => shared.evict_parent(rel),
             Err(e) => shared.fail(rel, tr("delete folder", "フォルダ削除"), &e),
+        }
+    }
+}
+
+fn create_links(plan: &Plan, shared: &Shared) {
+    for item in &plan.links {
+        if shared.ctx.cancelled() {
+            return;
+        }
+        match platform::create_link(&plan.dest.join(&item.rel), &item.link) {
+            Ok(()) => {
+                shared.links_done.fetch_add(1, Ordering::Relaxed);
+            }
+            // Not a fault in this run: the account or the disk cannot hold links.
+            Err(e) if platform::link_unavailable(&e) => {
+                shared.ctx.log(trf!(
+                    "Link not created, because the destination or this account cannot make one: {}: {e}",
+                    "保存先またはこのアカウントでは作成できないため、リンクを作りませんでした: {}: {e}",
+                    item.rel.display()
+                ));
+                shared.evict_parent(&item.rel);
+            }
+            Err(e) => shared.fail(&item.rel, tr("create link", "リンク作成"), &e),
         }
     }
 }
@@ -226,6 +251,7 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
         evict: Mutex::new(plan.evict.clone()),
         disk_full: AtomicBool::new(false),
         counter: AtomicU64::new(0),
+        links_done: AtomicU64::new(0),
     };
 
     // A file and folder that swapped places must be cleared before copying.
@@ -253,6 +279,7 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
             shared.fail(rel, tr("create folder", "フォルダ作成"), &e);
         }
     }
+    create_links(&plan, &shared);
     copy_all(&plan, &shared);
     if shared.disk_full.load(Ordering::Relaxed) {
         ctx.log(tr(
@@ -277,6 +304,7 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
     let report = Report {
         copied: progress.files_done.load(Ordering::Relaxed),
         copied_bytes: progress.bytes_done.load(Ordering::Relaxed),
+        links: shared.links_done.load(Ordering::Relaxed),
         deleted: progress.deletes_done.load(Ordering::Relaxed),
         errors,
         scan_errors: plan.scan_errors,

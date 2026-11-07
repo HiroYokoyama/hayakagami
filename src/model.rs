@@ -52,6 +52,8 @@ pub struct ScanOptions {
     pub full_check_days: u32,
     /// Use the NTFS change journal to avoid listing unchanged source folders.
     pub use_journal: bool,
+    /// Recreate links in the destination, with their targets unchanged.
+    pub copy_links: bool,
     /// Reads the journal when this process lacks the rights to.
     pub journal_remote: Option<crate::journal::RemoteHandle>,
     pub scan_threads: Option<usize>,
@@ -64,6 +66,7 @@ impl Default for ScanOptions {
             force_full: false,
             full_check_days: 30,
             use_journal: false,
+            copy_links: false,
             journal_remote: None,
             scan_threads: None,
             copy_threads: None,

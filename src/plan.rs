@@ -33,6 +33,13 @@ pub struct PlanStats {
     pub copy_bytes: u64,
 }
 
+/// A link to recreate in the destination.
+#[derive(Clone, Debug)]
+pub struct LinkItem {
+    pub rel: PathBuf,
+    pub link: platform::LinkInfo,
+}
+
 /// How the destination was read for this plan.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DestScan {
@@ -65,6 +72,7 @@ pub struct Plan {
     pub source_scan: SourceScan,
     pub copies: Vec<CopyItem>,
     pub mkdirs: Vec<PathBuf>,
+    pub links: Vec<LinkItem>,
     /// Removed before copying because a file and a folder swapped places.
     pub conflict_files: Vec<PathBuf>,
     pub conflict_dirs: Vec<PathBuf>,
@@ -93,6 +101,7 @@ impl Plan {
     pub fn has_work(&self) -> bool {
         !(self.copies.is_empty()
             && self.mkdirs.is_empty()
+            && self.links.is_empty()
             && self.conflict_files.is_empty()
             && self.conflict_dirs.is_empty()
             && self.delete_files.is_empty()
@@ -142,6 +151,7 @@ struct Queues {
 struct Output {
     copies: Vec<CopyItem>,
     mkdirs: Vec<PathBuf>,
+    links: Vec<LinkItem>,
     conflict_files: Vec<PathBuf>,
     conflict_dirs: Vec<PathBuf>,
     delete_files: Vec<PathBuf>,
@@ -164,6 +174,7 @@ struct Walker<'a> {
     cached: Mutex<Option<DirMap>>,
     source_saved: Mutex<Option<DirMap>>,
     keep_source: bool,
+    copy_links: bool,
     queues: Mutex<Queues>,
     wake: Condvar,
     out: Mutex<Output>,
@@ -504,8 +515,96 @@ impl Walker<'_> {
         match entry.kind {
             Kind::Dir => local.stats.source_dirs += 1,
             Kind::File => local.stats.source_files += 1,
+            // A link being copied is content, so its source is not "empty".
+            Kind::Link | Kind::DirLink if self.copy_links => local.stats.source_files += 1,
             _ => {}
         }
+    }
+
+    /// Reads a source link. A special file that is no link gets a warning.
+    fn source_link(
+        &self,
+        rel: &Path,
+        name: &std::ffi::OsStr,
+        local: &mut Output,
+    ) -> Option<platform::LinkInfo> {
+        let path = rel.join(name);
+        match platform::read_link(&join(self.source, &path)) {
+            Ok(link) => Some(link),
+            Err(e) => {
+                local.warnings.push(trf!(
+                    "This link cannot be copied: {}: {e}",
+                    "このリンクはコピーできません: {}: {e}",
+                    rel_text(&path)
+                ));
+                None
+            }
+        }
+    }
+
+    /// With links being copied: makes the destination's item match the source.
+    fn both_with_links(
+        &self,
+        rel: &Path,
+        s: &Entry,
+        d: &Entry,
+        local: &mut Output,
+        state: &mut Vec<Entry>,
+        children: &mut Vec<(PathBuf, Mode)>,
+    ) {
+        let path = rel.join(&s.name);
+        if !s.kind.is_link() {
+            // A real item replaces a destination link. Removing the link first
+            // means nothing is written through it.
+            match d.kind {
+                Kind::DirLink => local.conflict_dirs.push(path.clone()),
+                _ => local.conflict_files.push(path.clone()),
+            }
+            if s.kind == Kind::Dir {
+                local.mkdirs.push(path.clone());
+                children.push((path, Mode::SourceOnly));
+            } else {
+                local.stats.copy_bytes += s.size;
+                local.copies.push(CopyItem {
+                    rel: path,
+                    size: s.size,
+                    is_new: true,
+                });
+            }
+            state.push(s.clone());
+            return;
+        }
+        let Some(link) = self.source_link(rel, &s.name, local) else {
+            state.push(d.clone());
+            return;
+        };
+        match d.kind {
+            Kind::Link | Kind::DirLink => match platform::read_link(&join(self.dest, &path)) {
+                Ok(existing) if existing == link => {
+                    local.stats.unchanged += 1;
+                    state.push(s.clone());
+                    return;
+                }
+                Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                    local.warnings.push(trf!(
+                        "Skipped because the destination item cannot be read as a link: {}: {e}",
+                        "保存先をリンクとして読み取れないため処理しません: {}: {e}",
+                        rel_text(&path)
+                    ));
+                    state.push(d.clone());
+                    return;
+                }
+                _ if d.kind == Kind::DirLink => local.conflict_dirs.push(path.clone()),
+                _ => local.conflict_files.push(path.clone()),
+            },
+            Kind::File => local.conflict_files.push(path.clone()),
+            Kind::Dir => {
+                local.conflict_dirs.push(path.clone());
+                children.push((path.clone(), Mode::DestOnly { conflict: true }));
+            }
+        }
+        local.links.push(LinkItem { rel: path, link });
+        state.push(s.clone());
     }
 
     fn source_only(
@@ -539,6 +638,12 @@ impl Walker<'_> {
                 local.mkdirs.push(path.clone());
                 children.push((path, Mode::SourceOnly));
                 state.push(s.clone());
+            }
+            Kind::Link | Kind::DirLink if self.copy_links => {
+                if let Some(link) = self.source_link(rel, &s.name, local) {
+                    local.links.push(LinkItem { rel: path, link });
+                    state.push(s.clone());
+                }
             }
             Kind::Link | Kind::DirLink => local.warnings.push(trf!(
                 "Links are not copied: {}",
@@ -599,6 +704,10 @@ impl Walker<'_> {
             return;
         }
         self.count_source(s, local);
+        if self.copy_links && (s.kind.is_link() || d.kind.is_link()) {
+            self.both_with_links(rel, s, d, local, state, children);
+            return;
+        }
         if s.kind.is_link() || d.kind.is_link() {
             // Links are never followed or replaced: writing through one could
             // reach data outside the mirrored folder.
@@ -653,6 +762,7 @@ impl Walker<'_> {
         let mut out = self.out.lock().unwrap();
         out.copies.extend(local.copies);
         out.mkdirs.extend(local.mkdirs);
+        out.links.extend(local.links);
         out.conflict_files.extend(local.conflict_files);
         out.conflict_dirs.extend(local.conflict_dirs);
         out.delete_files.extend(local.delete_files);
@@ -868,6 +978,7 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         cached: Mutex::new(cached),
         source_saved: Mutex::new(source_saved),
         keep_source: next_index.is_some(),
+        copy_links: options.copy_links,
         queues: Mutex::new(Queues::default()),
         wake: Condvar::new(),
         out: Mutex::new(Output::default()),
@@ -896,6 +1007,7 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
     }
     out.copies.sort_unstable_by(|a, b| a.rel.cmp(&b.rel));
     out.mkdirs.sort_unstable();
+    out.links.sort_unstable_by(|a, b| a.rel.cmp(&b.rel));
     out.delete_files.sort_unstable();
     let deepest_first = |a: &PathBuf, b: &PathBuf| {
         b.components()
@@ -944,6 +1056,7 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         source_scan,
         copies: out.copies,
         mkdirs: out.mkdirs,
+        links: out.links,
         conflict_files: out.conflict_files,
         conflict_dirs: out.conflict_dirs,
         delete_files: out.delete_files,

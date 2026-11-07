@@ -60,7 +60,7 @@ It also behaves as follows:
 
 - Overlapping source and destination folders are refused.
 - A folder that cannot be read is left alone: nothing in it is copied or deleted.
-- Symbolic links and junctions are never followed.
+- Symbolic links and junctions are never followed. By default they are not copied either (see [Links](#links)).
 - Excluded files are not deleted from the destination.
 - Files are copied to a temporary name and then swapped in, so an interruption does not damage the existing copy.
 
@@ -99,6 +99,7 @@ hayakagami mirror <source> <destination> --exclude "*.tmp" --dry-run
 | `--dry-run` | Compare only and change nothing |
 | `--full` | Read the destination from disk instead of the saved state |
 | `--allow-delete` | Carry out changes that a safety check stopped |
+| `--copy-links` | Recreate links in the destination |
 | `--usn` | Use the NTFS change journal (Windows) |
 | `--scan-threads N` / `--copy-threads N` | Set the number of threads |
 | `--lang ja` | Choose the message language |
@@ -122,6 +123,14 @@ Matching ignores case.
 ## How files are compared
 
 Files are compared by size and modification time, not by content. On Windows, times must match exactly on NTFS and ReFS destinations, and may differ by up to 2 seconds elsewhere. On macOS and Linux they may always differ by up to 2 seconds.
+
+## Links
+
+Turn on **Copy links as links** under **Advanced** (`--copy-links` on the command line) to recreate symbolic links and junctions in the destination, as a disk copy would. It is off by default.
+
+- The target is kept exactly as it is. An absolute link in the destination still points to the original place.
+- What a link points to is not copied, unless it is also inside the mirrored folder.
+- On Windows, symbolic links need Developer Mode or administrator rights. Without them, or on a disk that cannot hold links such as exFAT, the link is skipped with a message. Junctions need no special rights.
 
 ## Current limitations
 

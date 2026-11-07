@@ -64,6 +64,23 @@ pub fn os_from_bytes(bytes: &[u8]) -> Option<OsString> {
     }
 }
 
+/// What a link is, exactly as stored: the target is never resolved or rewritten.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkInfo {
+    pub kind: LinkKind,
+    pub target: std::path::PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkKind {
+    /// A symbolic link. Unix makes no difference between targets.
+    File,
+    /// A Windows symbolic link to a folder.
+    Dir,
+    /// A Windows junction.
+    Junction,
+}
+
 #[cfg(windows)]
 pub use windows_impl::*;
 
@@ -75,23 +92,24 @@ mod windows_impl {
     use super::*;
     use crate::model::Kind;
     use std::ffi::{c_void, OsStr};
+    use std::fs;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use std::path::Component;
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::Foundation::{
         CloseHandle, GetLastError, ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_FILES,
-        ERROR_REQUEST_ABORTED, HANDLE, INVALID_HANDLE_VALUE,
+        ERROR_REQUEST_ABORTED, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CopyFileExW, CreateFileW, FindClose, FindExInfoBasic, FindExSearchNameMatch,
         FindFirstFileExW, FindNextFileW, GetDiskFreeSpaceExW, GetDriveTypeW, GetVolumeInformationW,
         GetVolumePathNameW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, FIND_FIRST_EX_LARGE_FETCH, OPEN_EXISTING,
-        WIN32_FIND_DATAW,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, FIND_FIRST_EX_LARGE_FETCH, OPEN_EXISTING, WIN32_FIND_DATAW,
     };
     use windows_sys::Win32::System::Ioctl::{
         PropertyStandardQuery, StorageDeviceSeekPenaltyProperty, DEVICE_SEEK_PENALTY_DESCRIPTOR,
-        IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_PROPERTY_QUERY,
+        FSCTL_SET_REPARSE_POINT, IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_PROPERTY_QUERY,
     };
     use windows_sys::Win32::System::IO::DeviceIoControl;
 
@@ -198,6 +216,145 @@ mod windows_impl {
                 };
             }
         }
+    }
+
+    /// Reads a link without following it. Other reparse points are unsupported.
+    pub fn read_link(path: &Path) -> io::Result<LinkInfo> {
+        const TAG_SYMLINK: u32 = 0xA000_000C;
+        const TAG_JUNCTION: u32 = 0xA000_0003;
+        let name = wide(path.as_os_str());
+        let mut data: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
+        let handle = unsafe {
+            FindFirstFileExW(
+                name.as_ptr(),
+                FindExInfoBasic,
+                (&mut data as *mut WIN32_FIND_DATAW).cast::<c_void>(),
+                FindExSearchNameMatch,
+                std::ptr::null(),
+                0,
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        unsafe { FindClose(handle) };
+        if data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
+        let is_dir = data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+        let kind = match (data.dwReserved0, is_dir) {
+            (TAG_JUNCTION, _) => LinkKind::Junction,
+            (TAG_SYMLINK, true) => LinkKind::Dir,
+            (TAG_SYMLINK, false) => LinkKind::File,
+            _ => return Err(io::ErrorKind::Unsupported.into()),
+        };
+        Ok(LinkInfo {
+            kind,
+            target: fs::read_link(path)?,
+        })
+    }
+
+    /// Creates a link at `path`, which must not exist.
+    pub fn create_link(path: &Path, link: &LinkInfo) -> io::Result<()> {
+        match link.kind {
+            LinkKind::File => std::os::windows::fs::symlink_file(&link.target, path),
+            LinkKind::Dir => std::os::windows::fs::symlink_dir(&link.target, path),
+            LinkKind::Junction => create_junction(path, &link.target),
+        }
+    }
+
+    /// The bytes of a mount point reparse buffer for a target.
+    fn junction_buffer(target: &Path) -> io::Result<Vec<u8>> {
+        const TAG_JUNCTION: u32 = 0xA000_0003;
+        const HEADER_AFTER_LENGTHS: u16 = 8;
+        let text = target.to_string_lossy();
+        let bare = text
+            .strip_prefix(r"\\?\")
+            .or_else(|| text.strip_prefix(r"\??\"))
+            .unwrap_or(&text);
+        let print: Vec<u16> = OsStr::new(bare).encode_wide().collect();
+        let mut substitute: Vec<u16> = OsStr::new(r"\??\").encode_wide().collect();
+        substitute.extend(&print);
+        let sub_bytes = u16::try_from(substitute.len() * 2)
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let print_bytes = u16::try_from(print.len() * 2)
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let data_length = sub_bytes
+            .checked_add(print_bytes)
+            .and_then(|n| n.checked_add(HEADER_AFTER_LENGTHS + 4))
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let mut out = Vec::with_capacity(usize::from(data_length) + 8);
+        out.extend(TAG_JUNCTION.to_le_bytes());
+        out.extend(data_length.to_le_bytes());
+        out.extend(0u16.to_le_bytes());
+        out.extend(0u16.to_le_bytes());
+        out.extend(sub_bytes.to_le_bytes());
+        out.extend((sub_bytes + 2).to_le_bytes());
+        out.extend(print_bytes.to_le_bytes());
+        for unit in substitute
+            .iter()
+            .chain(&[0u16])
+            .chain(&print)
+            .chain(&[0u16])
+        {
+            out.extend(unit.to_le_bytes());
+        }
+        Ok(out)
+    }
+
+    fn create_junction(path: &Path, target: &Path) -> io::Result<()> {
+        let buffer = junction_buffer(target)?;
+        fs::create_dir(path)?;
+        let set = || -> io::Result<()> {
+            let name = wide(path.as_os_str());
+            let handle = unsafe {
+                CreateFileW(
+                    name.as_ptr(),
+                    GENERIC_WRITE,
+                    0,
+                    std::ptr::null(),
+                    OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                    std::ptr::null_mut(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(io::Error::last_os_error());
+            }
+            let mut got = 0u32;
+            let ok = unsafe {
+                DeviceIoControl(
+                    handle,
+                    FSCTL_SET_REPARSE_POINT,
+                    buffer.as_ptr().cast(),
+                    buffer.len() as u32,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut got,
+                    std::ptr::null_mut(),
+                )
+            };
+            let result = if ok == 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            };
+            unsafe { CloseHandle(handle) };
+            result
+        };
+        let result = set();
+        if result.is_err() {
+            // The empty folder is ours, made a moment ago.
+            let _ = fs::remove_dir(path);
+        }
+        result
+    }
+
+    /// True when this account or file system cannot make links at all, as opposed
+    /// to one link failing: no privilege, or no support on the destination.
+    pub fn link_unavailable(error: &io::Error) -> bool {
+        matches!(error.raw_os_error(), Some(1 | 50 | 1314 | 4390))
+            || error.kind() == io::ErrorKind::Unsupported
     }
 
     fn push_entry(data: &WIN32_FIND_DATAW, out: &mut Vec<Entry>) {
@@ -518,6 +675,30 @@ mod unix_impl {
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
         let rc = unsafe { libc::statvfs(bytes.as_ptr().cast(), &mut stat) };
         (rc == 0).then(|| stat.f_bavail as u64 * stat.f_frsize as u64)
+    }
+
+    /// Reads a link without following it. Devices and the like are unsupported.
+    pub fn read_link(path: &Path) -> io::Result<LinkInfo> {
+        if !fs::symlink_metadata(path)?.file_type().is_symlink() {
+            return Err(io::ErrorKind::Unsupported.into());
+        }
+        Ok(LinkInfo {
+            kind: LinkKind::File,
+            target: fs::read_link(path)?,
+        })
+    }
+
+    /// Creates a link at `path`, which must not exist.
+    pub fn create_link(path: &Path, link: &LinkInfo) -> io::Result<()> {
+        std::os::unix::fs::symlink(&link.target, path)
+    }
+
+    /// True when the destination file system cannot hold links at all.
+    pub fn link_unavailable(error: &io::Error) -> bool {
+        matches!(
+            error.raw_os_error(),
+            Some(libc::EPERM | libc::ENOTSUP | libc::ENOSYS)
+        ) || error.kind() == io::ErrorKind::Unsupported
     }
 
     /// File type registration is only implemented for Windows.

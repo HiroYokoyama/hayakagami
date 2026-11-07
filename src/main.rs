@@ -33,6 +33,9 @@ struct RunFlags {
     /// Carry out deletions that a safety check stopped
     #[arg(long)]
     allow_delete: bool,
+    /// Recreate links in the destination, with their targets unchanged
+    #[arg(long)]
+    copy_links: bool,
     /// Use the NTFS change journal. Needs administrator rights on most drives;
     /// without them the source is listed as usual
     #[arg(long)]
@@ -116,6 +119,14 @@ fn print_plan(plan: &Plan, verbose: bool, took: f64) {
         println!("  {} {warning}", tr("Warning:", "警告:"));
     }
     if verbose {
+        for item in &plan.links {
+            println!(
+                "    {} {} -> {}",
+                tr("link", "リンク"),
+                item.rel.display(),
+                item.link.target.display()
+            );
+        }
         for item in &plan.copies {
             let mark = if item.is_new {
                 tr("new", "新規")
@@ -140,6 +151,7 @@ fn run_pair(
     flags: &RunFlags,
     days: u32,
     journal: bool,
+    links: bool,
     ctx: &RunContext,
 ) -> Result<bool, MirrorError> {
     println!("{} -> {}", spec.source.display(), spec.dest.display());
@@ -147,6 +159,7 @@ fn run_pair(
         force_full: flags.full,
         full_check_days: days,
         use_journal: flags.usn || journal,
+        copy_links: flags.copy_links || links,
         journal_remote: None,
         scan_threads: flags.scan_threads,
         copy_threads: flags.copy_threads,
@@ -198,11 +211,17 @@ fn specs_from(pairs: &[FolderPair], common: &[String]) -> Vec<PairSpec> {
         .collect()
 }
 
-fn run_all(specs: Vec<PairSpec>, flags: &RunFlags, days: u32, journal: bool) -> ExitCode {
+fn run_all(
+    specs: Vec<PairSpec>,
+    flags: &RunFlags,
+    days: u32,
+    journal: bool,
+    links: bool,
+) -> ExitCode {
     let ctx = RunContext::new(Arc::new(|line| eprintln!("  {line}")));
     let mut clean = true;
     for spec in specs {
-        match run_pair(spec, flags, days, journal, &ctx) {
+        match run_pair(spec, flags, days, journal, links, &ctx) {
             Ok(ok) => clean &= ok,
             Err(e) => {
                 eprintln!("  {} {e}", tr("Stopped:", "中止:"));
@@ -241,6 +260,7 @@ fn main() -> ExitCode {
             &flags,
             30,
             false,
+            false,
         ),
         Command::Run { pattern, flags } => {
             let as_file = Path::new(&pattern);
@@ -254,6 +274,7 @@ fn main() -> ExitCode {
                         &flags,
                         found.full_check_days,
                         found.use_change_journal,
+                        found.copy_links,
                     ),
                     Err(e) => {
                         eprintln!("{e}");
@@ -283,6 +304,7 @@ fn main() -> ExitCode {
                 &flags,
                 found.full_check_days,
                 found.use_change_journal,
+                found.copy_links,
             )
         }
         Command::List => match saved {

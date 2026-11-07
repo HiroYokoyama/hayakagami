@@ -28,6 +28,9 @@ pub struct Pattern {
     /// Read the NTFS change journal to avoid listing unchanged source folders.
     #[serde(default)]
     pub use_change_journal: bool,
+    /// Recreate links in the destination, with their targets unchanged.
+    #[serde(default)]
+    pub copy_links: bool,
 }
 
 /// Extension of a pattern saved as its own file.
@@ -56,6 +59,7 @@ impl Pattern {
             full_check_days: default_full_check_days(),
             run_on_open: false,
             use_change_journal: false,
+            copy_links: false,
         }
     }
 }

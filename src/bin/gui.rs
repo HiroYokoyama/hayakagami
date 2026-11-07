@@ -247,6 +247,12 @@ fn build_rows(plans: &[Plan]) -> Vec<(RowKind, String)> {
             };
             rows.push((kind, item.rel.display().to_string()));
         }
+        for item in &plan.links {
+            rows.push((
+                RowKind::New,
+                format!("{} -> {}", item.rel.display(), item.link.target.display()),
+            ));
+        }
         for rel in plan.conflict_files.iter().chain(&plan.delete_files) {
             rows.push((RowKind::Delete, rel.display().to_string()));
         }
@@ -490,6 +496,7 @@ impl App {
             force_full: self.full_check,
             full_check_days: pattern.full_check_days,
             use_journal: pattern.use_change_journal,
+            copy_links: pattern.copy_links,
             journal_remote: self.journal_remote.clone(),
             scan_threads: None,
             copy_threads: None,
@@ -857,6 +864,19 @@ impl App {
                         .on_hover_text(tr(
                             "Safety checks still stop the run.",
                             "この場合も安全装置は働きます",
+                        ))
+                        .changed();
+                    changed |= ui
+                        .checkbox(
+                            &mut pattern.copy_links,
+                            tr(
+                                "Copy links as links, with their targets unchanged",
+                                "リンクをリンクのままコピーする(リンク先は変更しない)",
+                            ),
+                        )
+                        .on_hover_text(tr(
+                            "What a link points to is not copied, and an absolute link in the destination still points to the original place. On Windows, symbolic links need Developer Mode or administrator rights; without them they are skipped.",
+                            "リンク先の中身はコピーしません。絶対パスのリンクは、保存先でも元の場所を指します。Windowsのシンボリックリンクには開発者モードか管理者権限が必要で、ない場合はスキップします",
                         ))
                         .changed();
                     changed |= ui
