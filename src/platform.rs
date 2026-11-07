@@ -48,13 +48,11 @@ pub fn os_from_bytes(bytes: &[u8]) -> Option<OsString> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStringExt;
-        if bytes.len() % 2 != 0 {
+        if !bytes.len().is_multiple_of(2) {
             return None;
         }
-        let wide: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
+        let (pairs, _) = bytes.as_chunks::<2>();
+        let wide: Vec<u16> = pairs.iter().map(|c| u16::from_le_bytes(*c)).collect();
         Some(OsString::from_wide(&wide))
     }
     #[cfg(unix)]

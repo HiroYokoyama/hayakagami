@@ -106,6 +106,11 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// Where this pair's saved destination state is kept.
+    pub fn state_file(&self) -> &Path {
+        &self.cache_file
+    }
+
     pub fn delete_count(&self) -> usize {
         self.delete_files.len() + self.conflict_files.len()
     }
@@ -1018,19 +1023,20 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
     if !options.use_journal {
         journal::discard_index(&cache_file);
     }
-    let (source_saved, source_scan, next_index) = match prepared {
-        None => (None, SourceScan::Disk, None),
+    let (source_saved, source_scan, next_index, unchanged_since) = match prepared {
+        None => (None, SourceScan::Disk, None, None),
         Some(journal::Prepared {
             saved,
             outcome,
             denied,
             next,
+            unchanged_since,
         }) => {
             let scan = match outcome {
                 Ok(changed_folders) => SourceScan::Journal { changed_folders },
                 Err(reason) => SourceScan::JournalUnused { reason, denied },
             };
-            (saved, scan, next)
+            (saved, scan, next, unchanged_since)
         }
     };
 
@@ -1191,6 +1197,7 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
             root,
             volume_id,
             dirs: out.source_state,
+            unchanged_since,
         }),
     })
 }

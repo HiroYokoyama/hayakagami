@@ -199,6 +199,9 @@ pub struct SourceIndex {
     pub root: u64,
     pub volume_id: String,
     pub dirs: DirMap,
+    /// Set when the journal named nothing since this point in the saved file, so
+    /// saving needs to add only the new position.
+    pub unchanged_since: Option<cache::LogPosition>,
 }
 
 /// Where the saved source listings for a pair are kept.
@@ -221,6 +224,7 @@ pub struct Prepared {
     pub denied: bool,
     /// What to save after this scan.
     pub next: Option<(Cursor, u64, String)>,
+    pub unchanged_since: Option<cache::LogPosition>,
 }
 
 #[cfg(windows)]
@@ -243,6 +247,7 @@ pub fn prepare(_source: &Path, _index: &Path, _remote: Option<&RemoteHandle>) ->
         .into()),
         denied: false,
         next: None,
+        unchanged_since: None,
     }
 }
 
@@ -567,6 +572,7 @@ mod windows_impl {
             outcome: Err(reason.to_owned()),
             denied: false,
             next: None,
+            unchanged_since: None,
         }
     }
 
@@ -608,6 +614,7 @@ mod windows_impl {
             outcome: Err(reason),
             denied,
             next: next.clone(),
+            unchanged_since: None,
         };
 
         let Some(saved) = cache::load_source_index(index) else {
@@ -663,6 +670,9 @@ mod windows_impl {
             Err(failure) => return fail(failure.reason, failure.denied),
         };
 
+        // Nothing named means the saved listings still hold at the new position.
+        let unchanged = keys.listed.is_empty() && keys.trees.is_empty();
+        let unchanged_since = saved.unchanged_since.filter(|_| unchanged);
         let mut dirs = saved.dirs;
         forget_changed(&mut dirs, &keys.listed, &keys.trees);
         Prepared {
@@ -670,6 +680,7 @@ mod windows_impl {
             outcome: Ok((keys.listed.len() + keys.trees.len()) as u64),
             denied: false,
             next,
+            unchanged_since,
         }
     }
 }

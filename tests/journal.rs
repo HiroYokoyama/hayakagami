@@ -131,6 +131,55 @@ fn check_change(change: impl FnOnce(&Fixture)) {
     assert_eq!(tree(&f.source), tree(&f.dest));
 }
 
+/// A change can be found after many unchanged runs that added only a position.
+#[test]
+fn unchanged_runs_add_little_and_lose_nothing() {
+    let f = Fixture::new();
+    f.seed();
+    let index = hayakagami::journal::index_path(f.scan(None).state_file());
+    let first = f.scan(None);
+    if !readable(&first) {
+        return;
+    }
+    let full = fs::metadata(&index).unwrap().len();
+    f.run(first);
+    for _ in 0..5 {
+        f.run(f.scan(None));
+    }
+    let added = fs::metadata(&index).unwrap().len() - full;
+    // Other programs can touch the temporary folder's parent, which is outside
+    // the source, so these six runs add only a position each.
+    assert!(added < 1000, "added {added} bytes");
+
+    fs::write(f.source.join("c/three.txt"), "edited, and longer").unwrap();
+    let plan = f.scan(None);
+    assert!(readable(&plan));
+    f.run(plan);
+    assert_eq!(tree(&f.source), tree(&f.dest));
+}
+
+/// Losing the last position must mean reading the journal again, not missing a change.
+#[test]
+fn a_torn_position_reads_the_journal_again() {
+    let f = Fixture::new();
+    f.seed();
+    let index = hayakagami::journal::index_path(f.scan(None).state_file());
+    if !readable(&f.scan(None)) {
+        return;
+    }
+    f.run(f.scan(None));
+    fs::write(f.source.join("a/one.txt"), "edited, and longer").unwrap();
+    f.run(f.scan(None));
+    let bytes = fs::read(&index).unwrap();
+    fs::write(&index, &bytes[..bytes.len() - 1]).unwrap();
+
+    fs::write(f.source.join("d/four.txt"), "also edited, and longer").unwrap();
+    let plan = f.scan(None);
+    assert!(readable(&plan));
+    f.run(plan);
+    assert_eq!(tree(&f.source), tree(&f.dest));
+}
+
 #[test]
 fn an_edited_file_is_found() {
     check_change(|f| fs::write(f.source.join("a/b/two.txt"), "edited, longer").unwrap());
