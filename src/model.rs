@@ -50,6 +50,10 @@ pub struct ScanOptions {
     pub force_full: bool,
     /// Force a full scan when the last one is older than this. 0 disables the cache.
     pub full_check_days: u32,
+    /// Use the NTFS change journal to avoid listing unchanged source folders.
+    pub use_journal: bool,
+    /// Reads the journal when this process lacks the rights to.
+    pub journal_remote: Option<crate::journal::RemoteHandle>,
     pub scan_threads: Option<usize>,
     pub copy_threads: Option<usize>,
 }
@@ -59,6 +63,8 @@ impl Default for ScanOptions {
         Self {
             force_full: false,
             full_check_days: 30,
+            use_journal: false,
+            journal_remote: None,
             scan_threads: None,
             copy_threads: None,
         }

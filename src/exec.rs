@@ -178,6 +178,17 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
             display_path(&plan.dest)
         ))
     })?;
+    if let Some(index) = &plan.source_index {
+        // These listings describe the source at the saved position, whatever
+        // happens to the destination. If saving fails, the older file still holds.
+        let path = crate::journal::index_path(&plan.cache_file);
+        if let Err(e) = cache::save_source_index(&path, index) {
+            ctx.log(trf!(
+                "Could not save the source listing: {e}",
+                "元フォルダの記録を保存できませんでした: {e}"
+            ));
+        }
+    }
     if !plan.has_work() && matches!(plan.dest_scan, crate::plan::DestScan::Cached) {
         return Ok(Report {
             scan_errors: plan.scan_errors,

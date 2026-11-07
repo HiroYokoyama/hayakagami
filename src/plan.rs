@@ -7,6 +7,7 @@
 use crate::cache::{self, DirMap};
 use crate::exclude::Excludes;
 use crate::i18n::tr;
+use crate::journal::{self, SourceIndex};
 use crate::model::*;
 use crate::platform;
 use crate::trf;
@@ -40,12 +41,28 @@ pub enum DestScan {
     Cached,
 }
 
+/// How the source was read for this plan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceScan {
+    /// Listed from disk, the normal way.
+    Disk,
+    /// The change journal was asked for, but this run listed from disk anyway.
+    JournalUnused {
+        reason: String,
+        /// Administrator rights alone would have made the journal readable.
+        denied: bool,
+    },
+    /// Only the folders named by the change journal were listed.
+    Journal { changed_folders: u64 },
+}
+
 pub struct Plan {
     pub source: PathBuf,
     pub dest: PathBuf,
     pub copy_threads: usize,
     pub scan_threads: (usize, usize),
     pub dest_scan: DestScan,
+    pub source_scan: SourceScan,
     pub copies: Vec<CopyItem>,
     pub mkdirs: Vec<PathBuf>,
     /// Removed before copying because a file and a folder swapped places.
@@ -64,6 +81,8 @@ pub struct Plan {
     pub(crate) last_full: u64,
     pub(crate) cache_file: PathBuf,
     pub(crate) cache_enabled: bool,
+    /// Saved when the plan is carried out, for the next run's journal read.
+    pub(crate) source_index: Option<SourceIndex>,
 }
 
 impl Plan {
@@ -131,6 +150,7 @@ struct Output {
     stats: PlanStats,
     scan_errors: u64,
     state: DirMap,
+    source_state: DirMap,
     evict: HashSet<PathBuf>,
     fatal: Option<String>,
 }
@@ -142,6 +162,8 @@ struct Walker<'a> {
     tolerance: i64,
     ctx: &'a RunContext,
     cached: Mutex<Option<DirMap>>,
+    source_saved: Mutex<Option<DirMap>>,
+    keep_source: bool,
     queues: Mutex<Queues>,
     wake: Condvar,
     out: Mutex<Output>,
@@ -184,6 +206,16 @@ impl Walker<'_> {
                     .dest_entries
                     .fetch_add(listing.len() as u64, Ordering::Relaxed);
                 slots.dest = Some(Ok(listing));
+            }
+        }
+        if slots.source.is_none() {
+            let mut saved = self.source_saved.lock().unwrap();
+            if let Some(listing) = saved.as_mut().and_then(|m| m.remove(&rel)) {
+                self.ctx
+                    .progress
+                    .source_entries
+                    .fetch_add(listing.len() as u64, Ordering::Relaxed);
+                slots.source = Some(Ok(listing));
             }
         }
         let need_source = slots.source.is_none();
@@ -330,6 +362,14 @@ impl Walker<'_> {
                 return None;
             }
         };
+        if self.keep_source && !matches!(node.mode, Mode::DestOnly { .. }) {
+            let kept = source.clone();
+            self.out
+                .lock()
+                .unwrap()
+                .source_state
+                .insert(rel.clone(), kept);
+        }
         if let Mode::DestOnly { conflict } = node.mode {
             self.process_dest_only(rel, dest, conflict);
         } else {
@@ -785,6 +825,40 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         Err(reason) => (None, DestScan::Full(reason), cache::now_unix()),
     };
 
+    // The journal is only worth trusting along with the rest of the saved state,
+    // so a full check of the destination also lists the whole source.
+    let prepared = options.use_journal.then(|| {
+        let mut prepared = journal::prepare(
+            &source,
+            &journal::index_path(&cache_file),
+            options.journal_remote.as_ref(),
+        );
+        if let DestScan::Full(reason) = &dest_scan {
+            if prepared.saved.take().is_some() {
+                prepared.outcome = Err(reason.clone());
+            }
+        }
+        prepared
+    });
+    if !options.use_journal {
+        journal::discard_index(&cache_file);
+    }
+    let (source_saved, source_scan, next_index) = match prepared {
+        None => (None, SourceScan::Disk, None),
+        Some(journal::Prepared {
+            saved,
+            outcome,
+            denied,
+            next,
+        }) => {
+            let scan = match outcome {
+                Ok(changed_folders) => SourceScan::Journal { changed_folders },
+                Err(reason) => SourceScan::JournalUnused { reason, denied },
+            };
+            (saved, scan, next)
+        }
+    };
+
     let walker = Walker {
         source: &source,
         dest: &dest,
@@ -792,6 +866,8 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         tolerance,
         ctx,
         cached: Mutex::new(cached),
+        source_saved: Mutex::new(source_saved),
+        keep_source: next_index.is_some(),
         queues: Mutex::new(Queues::default()),
         wake: Condvar::new(),
         out: Mutex::new(Output::default()),
@@ -865,6 +941,7 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         copy_threads,
         scan_threads: (source_threads, dest_threads),
         dest_scan,
+        source_scan,
         copies: out.copies,
         mkdirs: out.mkdirs,
         conflict_files: out.conflict_files,
@@ -881,5 +958,11 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         last_full,
         cache_file,
         cache_enabled,
+        source_index: next_index.map(|(cursor, root, volume_id)| SourceIndex {
+            cursor,
+            root,
+            volume_id,
+            dirs: out.source_state,
+        }),
     })
 }

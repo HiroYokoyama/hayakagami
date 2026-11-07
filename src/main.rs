@@ -5,7 +5,7 @@ use hayakagami::config::{self, FolderPair};
 use hayakagami::exec::{self, Report};
 use hayakagami::i18n::{self, tr, Lang};
 use hayakagami::model::{MirrorError, PairSpec, RunContext, ScanOptions};
-use hayakagami::plan::{self, DestScan, Plan};
+use hayakagami::plan::{self, DestScan, Plan, SourceScan};
 use hayakagami::trf;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -33,6 +33,10 @@ struct RunFlags {
     /// Carry out deletions that a safety check stopped
     #[arg(long)]
     allow_delete: bool,
+    /// Use the NTFS change journal. Needs administrator rights on most drives;
+    /// without them the source is listed as usual
+    #[arg(long)]
+    usn: bool,
     /// Scan threads, replacing the automatic per-disk setting
     #[arg(long)]
     scan_threads: Option<usize>,
@@ -66,7 +70,24 @@ enum Command {
     List,
 }
 
+fn source_text(scan: &SourceScan) -> Option<String> {
+    match scan {
+        SourceScan::Disk => None,
+        SourceScan::Journal { changed_folders } => Some(trf!(
+            "  Source: change journal ({changed_folders} folders changed)",
+            "  元フォルダ: 変更ジャーナル(変更 {changed_folders} フォルダ)"
+        )),
+        SourceScan::JournalUnused { reason, .. } => Some(trf!(
+            "  Source: full listing ({reason})",
+            "  元フォルダ: 全一覧({reason})"
+        )),
+    }
+}
+
 fn print_plan(plan: &Plan, verbose: bool, took: f64) {
+    if let Some(text) = source_text(&plan.source_scan) {
+        println!("{text}");
+    }
     let how = match &plan.dest_scan {
         DestScan::Cached => tr("cache", "キャッシュ").to_string(),
         DestScan::Full(reason) => trf!("full listing ({reason})", "全一覧({reason})"),
@@ -118,12 +139,15 @@ fn run_pair(
     spec: PairSpec,
     flags: &RunFlags,
     days: u32,
+    journal: bool,
     ctx: &RunContext,
 ) -> Result<bool, MirrorError> {
     println!("{} -> {}", spec.source.display(), spec.dest.display());
     let options = ScanOptions {
         force_full: flags.full,
         full_check_days: days,
+        use_journal: flags.usn || journal,
+        journal_remote: None,
         scan_threads: flags.scan_threads,
         copy_threads: flags.copy_threads,
     };
@@ -174,11 +198,11 @@ fn specs_from(pairs: &[FolderPair], common: &[String]) -> Vec<PairSpec> {
         .collect()
 }
 
-fn run_all(specs: Vec<PairSpec>, flags: &RunFlags, days: u32) -> ExitCode {
+fn run_all(specs: Vec<PairSpec>, flags: &RunFlags, days: u32, journal: bool) -> ExitCode {
     let ctx = RunContext::new(Arc::new(|line| eprintln!("  {line}")));
     let mut clean = true;
     for spec in specs {
-        match run_pair(spec, flags, days, &ctx) {
+        match run_pair(spec, flags, days, journal, &ctx) {
             Ok(ok) => clean &= ok,
             Err(e) => {
                 eprintln!("  {} {e}", tr("Stopped:", "中止:"));
@@ -216,6 +240,7 @@ fn main() -> ExitCode {
             }],
             &flags,
             30,
+            false,
         ),
         Command::Run { pattern, flags } => {
             let as_file = Path::new(&pattern);
@@ -228,6 +253,7 @@ fn main() -> ExitCode {
                         specs_from(&found.pairs, &found.excludes),
                         &flags,
                         found.full_check_days,
+                        found.use_change_journal,
                     ),
                     Err(e) => {
                         eprintln!("{e}");
@@ -256,6 +282,7 @@ fn main() -> ExitCode {
                 specs_from(&found.pairs, &found.excludes),
                 &flags,
                 found.full_check_days,
+                found.use_change_journal,
             )
         }
         Command::List => match saved {

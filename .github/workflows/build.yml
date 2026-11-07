@@ -41,6 +41,8 @@ jobs:
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
+        env:
+          HAYAKAGAMI_REQUIRE_USN: "1"
         run: cargo test
       - name: Build
         run: cargo build --release --locked

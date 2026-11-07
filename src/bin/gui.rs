@@ -3,10 +3,12 @@
 
 use eframe::egui::{self, Color32, CornerRadius, Frame, RichText, Stroke};
 use hayakagami::config::{self, Config, FolderPair, Pattern};
+use hayakagami::elevate;
 use hayakagami::exec;
 use hayakagami::i18n::{self, tr, Lang};
+use hayakagami::journal::{self, RemoteHandle};
 use hayakagami::model::{display_path, MirrorError, PairSpec, Phase, RunContext, ScanOptions};
-use hayakagami::plan::{self, DestScan, Plan};
+use hayakagami::plan::{self, DestScan, Plan, SourceScan};
 use hayakagami::platform;
 use hayakagami::trf;
 use std::path::{Path, PathBuf};
@@ -87,6 +89,10 @@ struct App {
     file_mode: Option<PathBuf>,
     /// What to start after opening a pattern file: true runs, false previews.
     auto_start: Option<bool>,
+    /// The elevated change journal reader, kept for the life of this window.
+    journal_remote: Option<RemoteHandle>,
+    /// The permission prompt was declined, so it is not shown again in this window.
+    journal_declined: bool,
 }
 
 fn load_fonts(ctx: &egui::Context) {
@@ -274,6 +280,21 @@ fn scan_all(
                     DestScan::Cached => tr("cache", "キャッシュ").to_owned(),
                     DestScan::Full(reason) => reason.clone(),
                 };
+                match &plan.source_scan {
+                    SourceScan::Disk => {}
+                    SourceScan::Journal { changed_folders } => {
+                        let _ = tx.send(Message::Log(trf!(
+                            "Source read through the change journal: {changed_folders} folders changed",
+                            "変更ジャーナルで元フォルダを確認: 変更 {changed_folders} フォルダ"
+                        )));
+                    }
+                    SourceScan::JournalUnused { reason, .. } => {
+                        let _ = tx.send(Message::Log(trf!(
+                            "Source listed from disk: {reason}",
+                            "元フォルダを通常どおり読み取り: {reason}"
+                        )));
+                    }
+                }
                 let _ = tx.send(Message::Log(trf!(
                     "Compared in {took:.2} s: {label}: copy {copies}, delete {deletes} ({how})",
                     "比較 {took:.2}秒: {label}: コピー {copies}、削除 {deletes}({how})"
@@ -358,9 +379,45 @@ impl App {
             job: None,
             file_mode: file,
             auto_start,
+            journal_remote: None,
+            journal_declined: false,
         };
         app.sync_excludes_text();
+        // A pattern file asks at once, so the prompt comes when it is opened
+        // and not partway through its preview or run.
+        if app.file_mode.is_some() {
+            app.ensure_journal_access();
+        }
         app
+    }
+
+    /// Asks for administrator rights if the selected pattern uses the change
+    /// journal on a drive that needs them. Declining means a normal scan.
+    fn ensure_journal_access(&mut self) {
+        if self.journal_remote.is_some() || self.journal_declined {
+            return;
+        }
+        let Some(pattern) = self.config.patterns.get(self.selected) else {
+            return;
+        };
+        let needed = pattern.use_change_journal
+            && pattern
+                .pairs
+                .iter()
+                .any(|pair| journal::needs_elevation(Path::new(pair.source.trim())));
+        if !needed {
+            return;
+        }
+        match elevate::start() {
+            Ok(remote) => self.journal_remote = Some(remote),
+            Err(e) => {
+                self.journal_declined = true;
+                self.log.push(trf!(
+                    "The change journal will not be used in this window: {e}",
+                    "このウィンドウでは変更ジャーナルを使いません: {e}"
+                ));
+            }
+        }
     }
 
     fn sync_excludes_text(&mut self) {
@@ -399,6 +456,7 @@ impl App {
     }
 
     fn specs(&mut self) -> Option<(Vec<PairSpec>, ScanOptions)> {
+        self.ensure_journal_access();
         let pattern = self.config.patterns.get(self.selected)?;
         let mut specs = Vec::new();
         for pair in &pattern.pairs {
@@ -431,6 +489,8 @@ impl App {
         let options = ScanOptions {
             force_full: self.full_check,
             full_check_days: pattern.full_check_days,
+            use_journal: pattern.use_change_journal,
+            journal_remote: self.journal_remote.clone(),
             scan_threads: None,
             copy_threads: None,
         };
@@ -797,6 +857,19 @@ impl App {
                         .on_hover_text(tr(
                             "Safety checks still stop the run.",
                             "この場合も安全装置は働きます",
+                        ))
+                        .changed();
+                    changed |= ui
+                        .checkbox(
+                            &mut pattern.use_change_journal,
+                            tr(
+                                "Use the NTFS change journal to skip unchanged folders",
+                                "NTFSの変更ジャーナルで、変更のないフォルダを読み飛ばす",
+                            ),
+                        )
+                        .on_hover_text(tr(
+                            "Windows asks for permission when a drive needs administrator rights. The rights are used only to read the journal. Declining means a normal scan.",
+                            "管理者権限が必要なドライブでは、Windowsが許可を求めます。権限は変更ジャーナルの読み取りだけに使います。許可しない場合は通常どおりスキャンします",
                         ))
                         .changed();
                     ui.horizontal(|ui| {
@@ -1376,7 +1449,13 @@ impl eframe::App for App {
 }
 
 fn main() -> eframe::Result {
-    let file = std::env::args_os().nth(1).map(PathBuf::from);
+    let mut args = std::env::args_os().skip(1);
+    let file = args.next();
+    if file.as_deref() == Some(std::ffi::OsStr::new(elevate::HELPER_ARG)) {
+        let pipe = args.next().unwrap_or_default();
+        std::process::exit(elevate::helper_main(&pipe.to_string_lossy()));
+    }
+    let file = file.map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Hayakagami")
