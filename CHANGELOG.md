@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1
+
+### Added
+
+- An overall progress bar in the desktop app, across all folder pairs of a run, with the time so far.
+- Metadata updates appear as their own step with a count, instead of "Deleting 0 / 0".
+
+### Changed
+
+- Metadata is updated by several threads on SSD and network destinations. Hard disks keep one thread.
+
 ## 0.3.0
 
 The first run after updating is a full check, because the saved state has a new format.
