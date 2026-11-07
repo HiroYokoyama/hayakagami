@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.3
+
+### Added
+
+- The version in the title bar of the desktop app.
+- An About dialog under Preferences, with the icon, version, license and a link to the GitHub repository.
+
+### Changed
+
+- The log starts open.
+- More space between the Run and Pattern settings tabs.
+
 ## 0.3.2
 
 ### Fixed
