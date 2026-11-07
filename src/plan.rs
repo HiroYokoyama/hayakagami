@@ -6,8 +6,10 @@
 
 use crate::cache::{self, DirMap};
 use crate::exclude::Excludes;
+use crate::i18n::tr;
 use crate::model::*;
 use crate::platform;
+use crate::trf;
 use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -309,13 +311,18 @@ impl Walker<'_> {
                 let shown = rel_text(rel);
                 let mut out = self.out.lock().unwrap();
                 if rel.as_os_str().is_empty() {
-                    out.fatal = Some(format!("フォルダを読み取れません: {error}"));
+                    out.fatal = Some(trf!(
+                        "Cannot read the folder: {error}",
+                        "フォルダを読み取れません: {error}"
+                    ));
                     self.ctx.cancel.store(true, Ordering::Relaxed);
                     return None;
                 }
                 out.scan_errors += 1;
-                out.warnings
-                    .push(format!("読み取れないため処理しません: {shown}: {error}"));
+                out.warnings.push(trf!(
+                    "Skipped because it cannot be read: {shown}: {error}",
+                    "読み取れないため処理しません: {shown}: {error}"
+                ));
                 if let Some(parent) = rel.parent() {
                     out.evict.insert(parent.to_path_buf());
                 }
@@ -387,7 +394,8 @@ impl Walker<'_> {
         keyed.dedup_by(|later, first| {
             let same = later.0 == first.0;
             if same {
-                warnings.push(format!(
+                warnings.push(trf!(
+                    "Ignored because another item has the same name: {}",
                     "同じ名前として扱われるため無視します: {}",
                     rel_text(&rel.join(&later.1.name))
                 ));
@@ -492,9 +500,11 @@ impl Walker<'_> {
                 children.push((path, Mode::SourceOnly));
                 state.push(s.clone());
             }
-            Kind::Link | Kind::DirLink => local
-                .warnings
-                .push(format!("リンクはコピーしません: {}", rel_text(&path))),
+            Kind::Link | Kind::DirLink => local.warnings.push(trf!(
+                "Links are not copied: {}",
+                "リンクはコピーしません: {}",
+                rel_text(&path)
+            )),
         }
     }
 
@@ -552,9 +562,11 @@ impl Walker<'_> {
         if s.kind.is_link() || d.kind.is_link() {
             // Links are never followed or replaced: writing through one could
             // reach data outside the mirrored folder.
-            local
-                .warnings
-                .push(format!("リンクがあるため処理しません: {}", rel_text(&path)));
+            local.warnings.push(trf!(
+                "Skipped because it is a link: {}",
+                "リンクがあるため処理しません: {}",
+                rel_text(&path)
+            ));
             state.push(d.clone());
             return;
         }
@@ -617,8 +629,12 @@ impl Walker<'_> {
 
 /// Resolves a destination that may not exist yet through its nearest existing ancestor.
 fn resolve_dest(dest: &Path) -> Result<PathBuf, MirrorError> {
-    let absolute = std::path::absolute(dest)
-        .map_err(|e| MirrorError::Fatal(format!("保存先のパスが不正です: {e}")))?;
+    let absolute = std::path::absolute(dest).map_err(|e| {
+        MirrorError::Fatal(trf!(
+            "Invalid destination path: {e}",
+            "保存先のパスが不正です: {e}"
+        ))
+    })?;
     let mut existing = absolute.as_path();
     let mut rest = Vec::new();
     loop {
@@ -631,7 +647,8 @@ fn resolve_dest(dest: &Path) -> Result<PathBuf, MirrorError> {
             }
             Err(_) => {
                 let (Some(name), Some(parent)) = (existing.file_name(), existing.parent()) else {
-                    return Err(MirrorError::Fatal(format!(
+                    return Err(MirrorError::Fatal(trf!(
+                        "The destination drive was not found: {}",
                         "保存先のドライブが見つかりません: {}",
                         dest.display()
                     )));
@@ -659,26 +676,38 @@ fn usable_cache(
     cache_file: &Path,
 ) -> Result<cache::CacheFile, String> {
     if options.force_full {
-        return Err("フルチェックが指定されました".into());
+        return Err(tr("full check requested", "フルチェックが指定されました").into());
     }
     if options.full_check_days == 0 {
-        return Err("キャッシュは無効です".into());
+        return Err(tr("cache is turned off", "キャッシュは無効です").into());
     }
     if !dest.is_dir() {
-        return Err("保存先がまだありません".into());
+        return Err(tr(
+            "the destination does not exist yet",
+            "保存先がまだありません",
+        )
+        .into());
     }
     let Some(loaded) = cache::load(cache_file) else {
-        return Err("キャッシュがありません".into());
+        return Err(tr("no saved state yet", "キャッシュがありません").into());
     };
     if loaded.volume_id != volume_id {
-        return Err("保存先のディスクが前回と異なります".into());
+        return Err(tr(
+            "the destination disk changed",
+            "保存先のディスクが前回と異なります",
+        )
+        .into());
     }
     if cache::read_marker(dest).as_deref() != Some(loaded.run_id.as_str()) {
-        return Err("前回の実行が完了していないか、保存先が変更されました".into());
+        return Err(tr(
+            "the last run did not finish, or the destination changed",
+            "前回の実行が完了していないか、保存先が変更されました",
+        )
+        .into());
     }
     let age = cache::now_unix().saturating_sub(loaded.last_full);
     if age > u64::from(options.full_check_days) * 86_400 {
-        return Err("定期フルチェックの時期です".into());
+        return Err(tr("periodic full check is due", "定期フルチェックの時期です").into());
     }
     Ok(loaded)
 }
@@ -687,13 +716,15 @@ fn usable_cache(
 pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<Plan, MirrorError> {
     ctx.progress.set_phase(Phase::Scanning);
     let source = spec.source.canonicalize().map_err(|e| {
-        MirrorError::Fatal(format!(
+        MirrorError::Fatal(trf!(
+            "The source folder was not found: {}: {e}",
             "元フォルダが見つかりません: {}: {e}",
             spec.source.display()
         ))
     })?;
     if !source.is_dir() {
-        return Err(MirrorError::Fatal(format!(
+        return Err(MirrorError::Fatal(trf!(
+            "The source is not a folder: {}",
             "元がフォルダではありません: {}",
             spec.source.display()
         )));
@@ -701,16 +732,18 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
     let dest = resolve_dest(&spec.dest)?;
     let (a, b) = (comparable(&source), comparable(&dest));
     if a.starts_with(&b) || b.starts_with(&a) {
-        return Err(MirrorError::Guard(format!(
+        return Err(MirrorError::Guard(trf!(
+            "The source and destination overlap: {} / {}",
             "元と保存先が重なっています: {} / {}",
-            source.display(),
-            dest.display()
+            display_path(&source),
+            display_path(&dest)
         )));
     }
     if dest.exists() && !dest.is_dir() {
-        return Err(MirrorError::Fatal(format!(
+        return Err(MirrorError::Fatal(trf!(
+            "The destination is not a folder: {}",
             "保存先がフォルダではありません: {}",
-            dest.display()
+            display_path(&dest)
         )));
     }
     let excludes = Excludes::new(&spec.excludes).map_err(MirrorError::Fatal)?;
@@ -799,17 +832,26 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
 
     let delete_total = (out.delete_files.len() + out.conflict_files.len()) as u64;
     let delete_dirs_total = (out.delete_dirs.len() + out.conflict_dirs.len()) as u64;
+    let updates = out.copies.iter().filter(|c| !c.is_new).count() as u64;
     let source_empty = out.stats.source_files == 0 && out.stats.source_dirs == 0;
     let guard = if source_empty && (delete_total > 0 || delete_dirs_total > 0) {
-        Some(format!(
+        Some(trf!(
+            "The source folder is empty, but {delete_total} files would be deleted from the destination. Check that the drive is connected.",
             "元フォルダが空なのに、保存先のファイルを {delete_total} 件削除しようとしています。ドライブの接続を確認してください"
         ))
     } else if dest_existed && !had_marker && (delete_total > 0 || delete_dirs_total > 0) {
-        Some(format!(
+        Some(trf!(
+            "{delete_total} files would be deleted from a destination that Hayakagami has never mirrored to. Check that this is the right folder.",
             "このソフトでミラーしたことがない保存先のファイルを {delete_total} 件削除しようとしています。保存先が正しいか確認してください"
         ))
+    } else if dest_existed && !had_marker && updates > 0 {
+        Some(trf!(
+            "{updates} existing files would be overwritten in a destination that Hayakagami has never mirrored to. Check that this is the right folder.",
+            "このソフトでミラーしたことがない保存先のファイルを {updates} 件上書きしようとしています。保存先が正しいか確認してください"
+        ))
     } else if out.stats.dest_files >= 10 && delete_total * 2 >= out.stats.dest_files {
-        Some(format!(
+        Some(trf!(
+            "{delete_total} of the {} files in the destination would be deleted. Check that the source and destination are right.",
             "保存先の {} 件のうち {delete_total} 件を削除しようとしています。元と保存先が正しいか確認してください",
             out.stats.dest_files
         ))

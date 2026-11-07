@@ -1,101 +1,128 @@
-# Hayakagami(早鏡)
+<p align="center"><img src="assets/icon-256.png" width="128" alt="Hayakagami icon"></p>
 
-フォルダ単位のミラーバックアップソフトです。Windows、macOS、Linuxで動きます。
+# Hayakagami
 
-変更がほとんどないのにスキャンで待たされる、という場面を速くすることを目標にしています。
+English | [日本語](README_JA.md)
 
-> **ご注意:** ミラーは、元にないファイルを保存先から削除します。初めて使うフォルダでは、必ず「プレビュー」(CLIは `--dry-run`)で内容を確認してください。
+A folder-based mirror backup tool for Windows, macOS and Linux.
 
-## 速さの仕組み
+It is built for the common case where almost nothing changed, yet a backup still spends its time scanning.
 
-- **保存先を読まない:** 前回の保存先の状態を手元に記録し、次回は元フォルダだけを読んで比較します。
-- **一覧をまとめて取得:** Windowsではファイルを1つずつ開かず、フォルダ単位でサイズと更新日時を取得します。
-- **ディスクに合わせて並列数を調整:** HDDは少なく、SSDとネットワークは多くします。種類を判定できないディスクはHDDとして扱います。
+> **Warning:** a mirror deletes files from the destination when they are gone from the source. The first time you use a folder, check the plan with **Preview** (`--dry-run` on the command line).
 
-## 記録が信用できないとき
+![The Run tab](docs/screenshot.png)
 
-次の場合は記録を使わず、保存先も全部読みます(フルチェック)。
+![The Pattern settings tab](docs/screenshot-settings.png)
 
-- 保存先のディスクが前回と異なる
-- 前回の実行が途中で終わった
-- 保存先の `.hayakagami-state` がない、または内容が一致しない
-- 定期フルチェックの時期になった(標準は30日)
-- フルチェックを指定した
+## Why it is fast
 
-記録を使っている間は、**保存先を手で変更しても気づきません**。保存先のファイルを手で消した場合などは、フルチェックで実行してください。
+- **It skips the destination.** The state of the destination is remembered after each run, so the next run only reads the source.
+- **It lists folders in bulk.** On Windows, sizes and dates come from one listing per folder, without opening each file.
+- **It adapts to the disk.** Hard disks get few threads, while SSDs and network shares get more. A disk that cannot be identified is treated as a hard disk.
 
-## データを守る仕組み
+## When the saved state is not trusted
 
-次の場合は何も変更せずに止まり、内容の確認を求めます。
+Hayakagami reads the whole destination (a full check) when:
 
-- 元フォルダが空なのに、保存先に削除対象がある(ドライブの接続ミスなど)
-- Hayakagamiでミラーしたことがない保存先に、削除対象がある(保存先の選び間違いなど)
-- 保存先のファイルの半分以上を削除しようとしている(保存先に10ファイル以上ある場合)
+- the destination disk changed
+- the last run did not finish
+- `.hayakagami-state` in the destination is missing or does not match
+- the periodic full check is due (every 30 days by default)
+- you ask for a full check
 
-このほか、次のように動きます。
+While the saved state is in use, **changes made by hand in the destination go unnoticed**. Run a full check after editing the destination yourself.
 
-- 元と保存先が重なっている場合は実行しません。
-- 読み取れなかったフォルダの中は、削除もコピーもしません。
-- シンボリックリンクとジャンクションはたどりません。
-- 除外したファイルは、保存先にあっても削除しません。
-- コピーは一時ファイルに書いてから置き換えるので、途中で止まっても元のファイルは壊れません。
+## How your data is protected
 
-## 使い方
+Hayakagami stops without changing anything, and asks you to review the plan, when:
 
-### GUI
+- the source is empty but files would be deleted (a disconnected drive, for example)
+- files would be deleted from a destination it has never mirrored to (the wrong folder, for example)
+- existing files would be overwritten in a destination it has never mirrored to
+- half or more of the destination's files would be deleted (when it holds 10 files or more)
 
-`hayakagami-gui` を起動して、パターンを作成します。パターンには、名前付きで複数のフォルダの組と除外設定を保存できます。
+It also behaves as follows:
 
-1. 「追加」でパターンを作成し、元と保存先のフォルダを指定します。
-2. 「プレビュー」で内容を確認します。
-3. 「この内容で実行」、または「実行」を押します。
+- Overlapping source and destination folders are refused.
+- A folder that cannot be read is left alone: nothing in it is copied or deleted.
+- Symbolic links and junctions are never followed.
+- Excluded files are not deleted from the destination.
+- Files are copied to a temporary name and then swapped in, so an interruption does not damage the existing copy.
 
-### CLI
+## Usage
+
+### Desktop app
+
+Start `hayakagami-gui` and create a pattern. A pattern is a named set of folder pairs and exclusions. Choose the language under **Preferences**.
+
+1. Press **New pattern**, then choose the source and destination folders under **Pattern settings**.
+2. On the **Run** tab, press **Preview** to review the plan.
+3. Press **Run this plan**, or **Run** to skip the preview.
+
+### Pattern files
+
+**Save as file** stores a pattern as a `.hkgm` file. On the command line, use `hayakagami run <file>.hkgm`.
+
+On Windows, press **Link .hkgm files** under **Preferences** to open these files with a double-click. Opening a file runs a preview. Turn on **Run right away when this pattern's file is opened** under **Advanced** to run it instead. Safety checks still apply.
+
+Double-click opening is not available on macOS yet.
+
+> Check a `.hkgm` file from someone else before opening it. It is plain text.
+
+### Command line
 
 ```bash
-hayakagami run <パターン名>
+hayakagami run <pattern name>
 ```
 
 ```bash
-hayakagami mirror <元フォルダ> <保存先フォルダ> --exclude "*.tmp" --dry-run
+hayakagami mirror <source> <destination> --exclude "*.tmp" --dry-run
 ```
 
-| オプション | 内容 |
+| Option | Meaning |
 |---|---|
-| `--dry-run` | 比較だけ行い、何も変更しない |
-| `--full` | 記録を使わず、保存先も全部読む |
-| `--allow-delete` | 安全装置が止めた削除も実行する |
-| `--scan-threads N` / `--copy-threads N` | 並列数を指定する |
-| `-v` | 変更内容を1件ずつ表示する |
+| `--dry-run` | Compare only and change nothing |
+| `--full` | Read the destination from disk instead of the saved state |
+| `--allow-delete` | Carry out changes that a safety check stopped |
+| `--scan-threads N` / `--copy-threads N` | Set the number of threads |
+| `--lang ja` | Choose the message language |
+| `-v` | List every change |
 
-終了コードは、0が成功、1が中止、2が一部エラーありです。
+Exit codes: 0 for success, 1 when stopped, 2 when some items failed.
 
-### 除外パターン
+### Exclusion patterns
 
-| 例 | 意味 |
+New patterns have no exclusions.
+
+| Example | Meaning |
 |---|---|
-| `*.tmp` | どの階層でも、名前が一致するものを除外 |
-| `node_modules` | どの階層でも、この名前を除外 |
-| `build/` | この名前のフォルダだけを除外 |
-| `docs/draft` | 元フォルダからの相対パスで除外 |
+| `*.tmp` | Matching names at any depth |
+| `node_modules` | This name at any depth |
+| `build/` | Folders with this name only |
+| `docs/draft` | A path relative to the mirrored folder |
 
-大文字と小文字は区別しません。
+Matching ignores case.
 
-## 比較の基準
+## How files are compared
 
-サイズと更新日時を比較します。ファイルの中身までは比較しません。NTFSとReFSの保存先は日時が完全に一致したときだけ、それ以外は2秒以内の差を同じとみなします。
+Files are compared by size and modification time, not by content. On Windows, times must match exactly on NTFS and ReFS destinations, and may differ by up to 2 seconds elsewhere. On macOS and Linux they may always differ by up to 2 seconds.
 
-## 現在の制限
+## Current limitations
 
-- 変更内容が同じサイズで、更新日時も変わらないファイルは検出できません。
-- 大文字と小文字だけの名前変更は、保存先に反映されません(Windows、macOS)。
-- フォルダ自体の更新日時と、アクセス権(ACL)はコピーしません。macOSとLinuxでは拡張属性もコピーしません。
-- 元フォルダは毎回読みます。
+- A change that keeps both the size and the modification time is not detected.
+- A rename that only changes letter case is not applied to the destination on Windows and macOS.
+- Folder modification times and access control lists are not copied. Extended attributes are not copied on macOS and Linux.
+- The source is read on every run.
 
-## ビルド
+## Building
 
 ```bash
 cargo build --release
 ```
 
-Linuxでは `libgtk-3-dev`、`libxkbcommon-dev`、`libgl1-mesa-dev` が必要です。
+Linux needs `libgtk-3-dev`, `libxkbcommon-dev` and `libgl1-mesa-dev`.
+
+## Scripts
+
+- `scripts/bench.py` measures speed. Run it through the `Benchmark` GitHub Actions workflow.
+- `scripts/make_icon.py` generates the icons in `assets/` (requires Pillow).

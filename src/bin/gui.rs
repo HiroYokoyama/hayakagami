@@ -1,16 +1,66 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 //! Desktop interface.
 
-use eframe::egui;
+use eframe::egui::{self, Color32, CornerRadius, Frame, RichText, Stroke};
 use hayakagami::config::{self, Config, FolderPair, Pattern};
 use hayakagami::exec;
-use hayakagami::model::{MirrorError, PairSpec, Phase, RunContext, ScanOptions};
+use hayakagami::i18n::{self, tr, Lang};
+use hayakagami::model::{display_path, MirrorError, PairSpec, Phase, RunContext, ScanOptions};
 use hayakagami::plan::{self, DestScan, Plan};
+use hayakagami::platform;
+use hayakagami::trf;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+const ACCENT: Color32 = Color32::from_rgb(14, 116, 128);
+const ACCENT_SOFT: Color32 = Color32::from_rgb(208, 236, 240);
+const BACKGROUND: Color32 = Color32::from_rgb(244, 246, 248);
+const CARD: Color32 = Color32::WHITE;
+const BORDER: Color32 = Color32::from_rgb(222, 226, 231);
+const TEXT: Color32 = Color32::from_rgb(33, 41, 52);
+const MUTED: Color32 = Color32::from_rgb(103, 113, 126);
+const GREEN: Color32 = Color32::from_rgb(22, 128, 80);
+const BLUE: Color32 = Color32::from_rgb(35, 99, 190);
+const RED: Color32 = Color32::from_rgb(196, 52, 44);
+const AMBER: Color32 = Color32::from_rgb(170, 110, 10);
+const RED_SOFT: Color32 = Color32::from_rgb(253, 236, 234);
+
+#[derive(Clone, Copy)]
+enum RowKind {
+    New,
+    Update,
+    Delete,
+    Warning,
+}
+
+impl RowKind {
+    fn label(self) -> &'static str {
+        match self {
+            RowKind::New => tr("New", "新規"),
+            RowKind::Update => tr("Update", "更新"),
+            RowKind::Delete => tr("Delete", "削除"),
+            RowKind::Warning => tr("Warning", "警告"),
+        }
+    }
+
+    fn color(self) -> Color32 {
+        match self {
+            RowKind::New => GREEN,
+            RowKind::Update => BLUE,
+            RowKind::Delete => RED,
+            RowKind::Warning => AMBER,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Run,
+    Settings,
+}
 
 enum Message {
     Log(String),
@@ -19,6 +69,7 @@ enum Message {
 }
 
 struct App {
+    tab: Tab,
     config: Config,
     config_path: PathBuf,
     /// Set when the saved file could not be read, so it is never overwritten.
@@ -29,9 +80,13 @@ struct App {
     full_check: bool,
     allow_guarded: bool,
     plans: Option<Vec<Plan>>,
-    rows: Vec<String>,
+    rows: Vec<(RowKind, String)>,
     log: Vec<String>,
     job: Option<(RunContext, Receiver<Message>)>,
+    /// The pattern file this window edits. Saved patterns are left alone then.
+    file_mode: Option<PathBuf>,
+    /// What to start after opening a pattern file: true runs, false previews.
+    auto_start: Option<bool>,
 }
 
 fn load_fonts(ctx: &egui::Context) {
@@ -51,7 +106,10 @@ fn load_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "cjk".to_owned(),
-        Arc::new(egui::FontData::from_owned(bytes)),
+        Arc::new(egui::FontData::from_owned(bytes).tweak(egui::FontTweak {
+            y_offset_factor: 0.12,
+            ..Default::default()
+        })),
     );
     for (family, position) in [
         (egui::FontFamily::Proportional, 0),
@@ -64,6 +122,90 @@ fn load_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+fn apply_style(ctx: &egui::Context) {
+    ctx.set_theme(egui::Theme::Light);
+    let mut visuals = egui::Visuals::light();
+    visuals.panel_fill = BACKGROUND;
+    visuals.window_fill = CARD;
+    visuals.extreme_bg_color = Color32::from_rgb(249, 250, 251);
+    visuals.override_text_color = Some(TEXT);
+    visuals.selection.bg_fill = ACCENT_SOFT;
+    visuals.selection.stroke = Stroke::new(1.0, ACCENT);
+    visuals.hyperlink_color = ACCENT;
+    let radius = CornerRadius::same(6);
+    for state in [
+        &mut visuals.widgets.noninteractive,
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        state.corner_radius = radius;
+    }
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, BORDER);
+    visuals.widgets.inactive.weak_bg_fill = CARD;
+    visuals.widgets.inactive.bg_fill = Color32::from_rgb(232, 235, 239);
+    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(238, 241, 244);
+    ctx.set_visuals_of(egui::Theme::Light, visuals);
+    ctx.all_styles_mut(|style| {
+        style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+        style.spacing.button_padding = egui::vec2(12.0, 5.0);
+        style.spacing.interact_size.y = 28.0;
+        style
+            .text_styles
+            .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
+        style
+            .text_styles
+            .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
+        style
+            .text_styles
+            .insert(egui::TextStyle::Small, egui::FontId::proportional(12.0));
+        style
+            .text_styles
+            .insert(egui::TextStyle::Heading, egui::FontId::proportional(18.0));
+    });
+}
+
+fn card() -> Frame {
+    Frame::new()
+        .fill(CARD)
+        .stroke(Stroke::new(1.0, BORDER))
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(12)
+}
+
+fn section_title(ui: &mut egui::Ui, text: &str) {
+    ui.label(RichText::new(text).color(MUTED).size(12.5).strong());
+}
+
+fn primary(text: &str) -> egui::Button<'static> {
+    egui::Button::new(
+        RichText::new(text.to_owned())
+            .color(Color32::WHITE)
+            .strong(),
+    )
+    .fill(ACCENT)
+    .stroke(Stroke::NONE)
+}
+
+fn tile(ui: &mut egui::Ui, label: &str, value: String, detail: Option<String>, color: Color32) {
+    card().show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = 2.0;
+        ui.label(RichText::new(label).color(MUTED).size(12.0));
+        ui.label(RichText::new(value).color(color).size(22.0).strong());
+        ui.add(
+            egui::Label::new(
+                RichText::new(detail.unwrap_or_else(|| " ".to_owned()))
+                    .color(MUTED)
+                    .size(12.0),
+            )
+            .truncate(),
+        );
+    });
+}
+
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -72,41 +214,41 @@ fn format_bytes(bytes: u64) -> String {
         value /= 1024.0;
         unit += 1;
     }
-    format!("{value:.1} {}", UNITS[unit])
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 
-fn describe_plan(plan: &Plan) -> String {
-    let how = match &plan.dest_scan {
-        DestScan::Cached => "キャッシュ".to_string(),
-        DestScan::Full(reason) => format!("全一覧: {reason}"),
-    };
-    format!(
-        "{} -> {}: 元 {} ファイル / 変更なし {} / コピー {} ({}) / 削除 {} [{how}]",
-        plan.source.display(),
-        plan.dest.display(),
-        plan.stats.source_files,
-        plan.stats.unchanged,
-        plan.copies.len(),
-        format_bytes(plan.stats.copy_bytes),
-        plan.delete_count(),
-    )
+fn short_name(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(|| display_path(path), |n| n.to_string_lossy().into_owned())
 }
 
-fn build_rows(plans: &[Plan]) -> Vec<String> {
+fn pair_label(plan: &Plan) -> String {
+    format!("{} → {}", short_name(&plan.source), short_name(&plan.dest))
+}
+
+fn build_rows(plans: &[Plan]) -> Vec<(RowKind, String)> {
     let mut rows = Vec::new();
     for plan in plans {
         for item in &plan.copies {
-            let mark = if item.is_new { "新規" } else { "更新" };
-            rows.push(format!("{mark}  {}", item.rel.display()));
+            let kind = if item.is_new {
+                RowKind::New
+            } else {
+                RowKind::Update
+            };
+            rows.push((kind, item.rel.display().to_string()));
         }
         for rel in plan.conflict_files.iter().chain(&plan.delete_files) {
-            rows.push(format!("削除  {}", rel.display()));
+            rows.push((RowKind::Delete, rel.display().to_string()));
         }
         for rel in plan.conflict_dirs.iter().chain(&plan.delete_dirs) {
-            rows.push(format!("削除  {}/", rel.display()));
+            rows.push((RowKind::Delete, format!("{}/", rel.display())));
         }
         for warning in &plan.warnings {
-            rows.push(format!("警告  {warning}"));
+            rows.push((RowKind::Warning, warning.clone()));
         }
     }
     rows
@@ -124,16 +266,22 @@ fn scan_all(
         let started = Instant::now();
         match plan::scan(spec, options, ctx) {
             Ok(plan) => {
-                let line = format!(
-                    "比較 {:.2}秒: {}",
-                    started.elapsed().as_secs_f64(),
-                    describe_plan(&plan)
-                );
-                let _ = tx.send(Message::Log(line));
+                let took = started.elapsed().as_secs_f64();
+                let label = pair_label(&plan);
+                let copies = plan.copies.len();
+                let deletes = plan.delete_count();
+                let how = match &plan.dest_scan {
+                    DestScan::Cached => tr("cache", "キャッシュ").to_owned(),
+                    DestScan::Full(reason) => reason.clone(),
+                };
+                let _ = tx.send(Message::Log(trf!(
+                    "Compared in {took:.2} s: {label}: copy {copies}, delete {deletes} ({how})",
+                    "比較 {took:.2}秒: {label}: コピー {copies}、削除 {deletes}({how})"
+                )));
                 plans.push(plan);
             }
             Err(e) => {
-                let _ = tx.send(Message::Log(format!("中止: {e}")));
+                let _ = tx.send(Message::Log(trf!("Stopped: {e}", "中止: {e}")));
                 return None;
             }
         }
@@ -143,21 +291,25 @@ fn scan_all(
 
 fn execute_all(plans: Vec<Plan>, allow: bool, ctx: &RunContext, tx: &Sender<Message>) {
     for plan in plans {
-        let label = format!("{} -> {}", plan.source.display(), plan.dest.display());
+        let label = pair_label(&plan);
         let started = Instant::now();
         match exec::execute(plan, ctx, allow) {
             Ok(report) => {
-                let _ = tx.send(Message::Log(format!(
-                    "完了 {:.2}秒: {label}: コピー {} ({}) / 削除 {} / エラー {}",
-                    started.elapsed().as_secs_f64(),
+                let took = started.elapsed().as_secs_f64();
+                let size = format_bytes(report.copied_bytes);
+                let errors = report.errors + report.scan_errors;
+                let _ = tx.send(Message::Log(trf!(
+                    "Done in {took:.2} s: {label}: copied {} ({size}), deleted {}, errors {errors}",
+                    "完了 {took:.2}秒: {label}: コピー {} ({size})、削除 {}、エラー {errors}",
                     report.copied,
-                    format_bytes(report.copied_bytes),
                     report.deleted,
-                    report.errors + report.scan_errors,
                 )));
             }
             Err(e) => {
-                let _ = tx.send(Message::Log(format!("中止: {label}: {e}")));
+                let _ = tx.send(Message::Log(trf!(
+                    "Stopped: {label}: {e}",
+                    "中止: {label}: {e}"
+                )));
                 if matches!(e, MirrorError::Cancelled | MirrorError::Guard(_)) {
                     return;
                 }
@@ -167,14 +319,31 @@ fn execute_all(plans: Vec<Plan>, allow: bool, ctx: &RunContext, tx: &Sender<Mess
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, file: Option<PathBuf>) -> Self {
         load_fonts(&cc.egui_ctx);
+        apply_style(&cc.egui_ctx);
         let config_path = config::config_path();
-        let (config, load_error) = match config::load(&config_path) {
+        let (mut config, mut load_error) = match config::load(&config_path) {
             Ok(config) => (config, None),
             Err(e) => (Config::default(), Some(e)),
         };
+        i18n::set_lang(Lang::from_code(&config.language));
+        let mut auto_start = None;
+        if let Some(path) = &file {
+            match config::load_pattern_file(path) {
+                Ok(pattern) => {
+                    auto_start = Some(pattern.run_on_open);
+                    config.patterns = vec![pattern];
+                    load_error = None;
+                }
+                Err(e) => {
+                    config.patterns.clear();
+                    load_error = Some(e);
+                }
+            }
+        }
         let mut app = Self {
+            tab: Tab::Run,
             config,
             config_path,
             load_error,
@@ -187,6 +356,8 @@ impl App {
             rows: Vec::new(),
             log: Vec::new(),
             job: None,
+            file_mode: file,
+            auto_start,
         };
         app.sync_excludes_text();
         app
@@ -209,7 +380,14 @@ impl App {
         if self.load_error.is_some() {
             return;
         }
-        if let Err(e) = config::save(&self.config_path, &self.config) {
+        let saved = match &self.file_mode {
+            Some(path) => match self.config.patterns.first() {
+                Some(pattern) => config::save_pattern_file(path, pattern),
+                None => Ok(()),
+            },
+            None => config::save(&self.config_path, &self.config),
+        };
+        if let Err(e) = saved {
             self.log.push(e);
         }
     }
@@ -225,8 +403,13 @@ impl App {
         let mut specs = Vec::new();
         for pair in &pattern.pairs {
             if pair.source.trim().is_empty() || pair.dest.trim().is_empty() {
-                self.log
-                    .push("元と保存先の両方を指定してください".to_string());
+                self.log.push(
+                    tr(
+                        "Choose both a source and a destination.",
+                        "元と保存先の両方を指定してください",
+                    )
+                    .to_owned(),
+                );
                 return None;
             }
             specs.push(PairSpec {
@@ -241,7 +424,8 @@ impl App {
             });
         }
         if specs.is_empty() {
-            self.log.push("フォルダの組がありません".to_string());
+            self.log
+                .push(tr("Add a folder pair first.", "フォルダの組を追加してください").to_owned());
             return None;
         }
         let options = ScanOptions {
@@ -300,7 +484,11 @@ impl App {
             };
             if plans.iter().any(|p| p.guard.is_some()) {
                 let _ = tx.send(Message::Log(
-                    "安全装置が働いたため、まだ何も変更していません。内容を確認してください".into(),
+                    tr(
+                        "A safety check stopped the run. Nothing was changed.",
+                        "安全装置が働いたため、何も変更していません",
+                    )
+                    .to_owned(),
                 ));
                 let _ = tx.send(Message::Plans(plans));
                 return;
@@ -342,221 +530,658 @@ impl App {
         }
     }
 
-    fn patterns_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("パターン");
-        ui.separator();
+    fn sidebar(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("Hayakagami")
+                .size(18.0)
+                .strong()
+                .color(ACCENT),
+        );
+        ui.add_space(10.0);
         let busy = self.job.is_some();
-        let mut selection = None;
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, true])
-            .max_height(ui.available_height() - 40.0)
-            .show(ui, |ui| {
-                for (i, pattern) in self.config.patterns.iter().enumerate() {
-                    if ui
-                        .selectable_label(i == self.selected, pattern.name.as_str())
-                        .clicked()
-                    {
-                        selection = Some(i);
-                    }
+        if let Some(path) = &self.file_mode {
+            section_title(ui, tr("PATTERN FILE", "パターンファイル"));
+            ui.label(short_name(path))
+                .on_hover_text(path.display().to_string());
+        } else {
+            section_title(ui, tr("PATTERNS", "パターン"));
+            let mut selection = None;
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .max_height((ui.available_height() - 130.0).max(40.0))
+                .show(ui, |ui| {
+                    ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                        for (i, pattern) in self.config.patterns.iter().enumerate() {
+                            if ui
+                                .selectable_label(i == self.selected, pattern.name.as_str())
+                                .clicked()
+                            {
+                                selection = Some(i);
+                            }
+                        }
+                    });
+                });
+            if let Some(i) = selection {
+                if !busy && i != self.selected {
+                    self.selected = i;
+                    self.sync_excludes_text();
+                    self.clear_preview();
                 }
-            });
-        if let Some(i) = selection {
-            if !busy && i != self.selected {
-                self.selected = i;
-                self.sync_excludes_text();
-                self.clear_preview();
             }
         }
-        ui.separator();
-        ui.add_enabled_ui(!busy, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("追加").clicked() {
-                    let name = format!("パターン{}", self.config.patterns.len() + 1);
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            ui.add_space(8.0);
+            self.settings_menu(ui);
+            if self.file_mode.is_some() {
+                return;
+            }
+            ui.separator();
+            ui.add_enabled_ui(!busy, |ui| {
+                let width = ui.available_width();
+                if ui
+                    .add_sized(
+                        [width, 28.0],
+                        egui::Button::new(tr("Open file", "ファイルを開く")),
+                    )
+                    .clicked()
+                {
+                    self.import_pattern();
+                }
+                if ui
+                    .add_sized(
+                        [width, 28.0],
+                        egui::Button::new(tr("New pattern", "新規パターン")),
+                    )
+                    .clicked()
+                {
+                    let name = trf!("Pattern {}", "パターン{}", self.config.patterns.len() + 1);
                     self.config.patterns.push(Pattern::new(name));
+                    self.tab = Tab::Settings;
                     self.selected = self.config.patterns.len() - 1;
                     self.sync_excludes_text();
                     self.clear_preview();
                     self.touch();
                 }
-                let can_remove = self.selected < self.config.patterns.len();
-                if ui.add_enabled(can_remove, egui::Button::new("削除")).clicked() {
-                    let name = self.config.patterns[self.selected].name.clone();
-                    let answer = rfd::MessageDialog::new()
-                        .set_title("パターンの削除")
-                        .set_description(format!(
-                            "パターン「{name}」の設定を削除しますか?フォルダ内のファイルは削除されません。"
-                        ))
-                        .set_buttons(rfd::MessageButtons::YesNo)
-                        .show();
-                    if answer == rfd::MessageDialogResult::Yes {
-                        self.config.patterns.remove(self.selected);
-                        self.selected = self.selected.min(self.config.patterns.len().saturating_sub(1));
-                        self.sync_excludes_text();
-                        self.clear_preview();
-                        self.touch();
-                    }
-                }
             });
         });
     }
 
-    fn pattern_editor(&mut self, ui: &mut egui::Ui) {
-        let mut changed = false;
-        let selected = self.selected;
-        let Some(pattern) = self.config.patterns.get_mut(selected) else {
-            ui.label("左の「追加」からパターンを作成してください");
+    fn settings_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button(tr("Preferences", "環境設定"), |ui| {
+            section_title(ui, tr("LANGUAGE", "言語"));
+            let current = i18n::lang();
+            let mut chosen = current;
+            ui.radio_value(&mut chosen, Lang::En, "English");
+            ui.radio_value(&mut chosen, Lang::Ja, "日本語");
+            if chosen != current {
+                i18n::set_lang(chosen);
+                self.config.language = chosen.code().to_owned();
+                if self.file_mode.is_some() {
+                    if let Err(e) = config::save_language(&self.config_path, chosen.code()) {
+                        self.log.push(e);
+                    }
+                } else {
+                    self.touch();
+                }
+            }
+            if cfg!(windows) {
+                ui.separator();
+                section_title(ui, tr("PATTERN FILES", "パターンファイル"));
+                self.file_type_buttons(ui);
+            }
+        });
+    }
+
+    fn file_type_buttons(&mut self, ui: &mut egui::Ui) {
+        let mut message = None;
+        if ui
+            .button(tr("Link .hkgm files", ".hkgm を関連付け"))
+            .on_hover_text(tr(
+                "Double-clicking a .hkgm file then opens it here. Applies to your Windows user only.",
+                ".hkgm をダブルクリックすると、ここで開きます。今のWindowsユーザーだけに適用します",
+            ))
+            .clicked()
+        {
+            let result = std::env::current_exe().and_then(|exe| platform::register_file_type(&exe));
+            message = Some(match result {
+                Ok(()) => tr(
+                    ".hkgm files now open with this app.",
+                    ".hkgm をこのアプリで開くように設定しました",
+                )
+                .to_owned(),
+                Err(e) => e.to_string(),
+            });
+        }
+        if ui
+            .button(tr("Unlink .hkgm files", ".hkgm の関連付け解除"))
+            .clicked()
+        {
+            message = Some(match platform::unregister_file_type() {
+                Ok(()) => tr(".hkgm link removed.", ".hkgm の関連付けを解除しました").to_owned(),
+                Err(e) => e.to_string(),
+            });
+        }
+        if let Some(message) = message {
+            self.log.push(message);
+        }
+    }
+
+    fn import_pattern(&mut self) {
+        let picked = rfd::FileDialog::new()
+            .add_filter(
+                tr("Hayakagami pattern", "Hayakagami パターン"),
+                &[config::PATTERN_EXTENSION],
+            )
+            .pick_file();
+        let Some(path) = picked else {
             return;
         };
-        ui.horizontal(|ui| {
-            ui.label("名前");
-            changed |= ui.text_edit_singleline(&mut pattern.name).changed();
-            ui.label("定期フルチェック(日)");
-            changed |= ui
-                .add(egui::DragValue::new(&mut pattern.full_check_days).range(0..=3650))
-                .on_hover_text("この日数ごとに保存先も全部読み直します。0でキャッシュを使いません")
-                .changed();
-        });
-        ui.add_space(4.0);
-        ui.label("フォルダの組(元 -> 保存先)");
-        let mut remove = None;
-        egui::ScrollArea::vertical()
-            .id_salt("pairs")
-            .max_height(150.0)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                for (i, pair) in pattern.pairs.iter_mut().enumerate() {
-                    ui.push_id(i, |ui| {
-                        changed |= pair_row(ui, pair, &mut remove, i);
-                    });
-                }
+        match config::load_pattern_file(&path) {
+            Ok(pattern) => {
+                self.config.patterns.push(pattern);
+                self.selected = self.config.patterns.len() - 1;
+                self.sync_excludes_text();
+                self.clear_preview();
+                self.touch();
+            }
+            Err(e) => self.log.push(e),
+        }
+    }
+
+    fn export_pattern(&mut self) {
+        let Some(pattern) = self.config.patterns.get(self.selected) else {
+            return;
+        };
+        let picked = rfd::FileDialog::new()
+            .set_file_name(format!("{}.{}", pattern.name, config::PATTERN_EXTENSION))
+            .add_filter(
+                tr("Hayakagami pattern", "Hayakagami パターン"),
+                &[config::PATTERN_EXTENSION],
+            )
+            .save_file();
+        let Some(path) = picked else {
+            return;
+        };
+        let message = match config::save_pattern_file(&path, pattern) {
+            Ok(()) => trf!("Saved {}", "{} に保存しました", path.display()),
+            Err(e) => e,
+        };
+        self.log.push(message);
+    }
+
+    fn confirm_remove_pattern(&mut self) {
+        let name = self.config.patterns[self.selected].name.clone();
+        let answer = rfd::MessageDialog::new()
+            .set_title(tr("Delete pattern", "パターンの削除"))
+            .set_description(trf!(
+                "Delete the settings of \"{name}\"? Files in the folders are not touched.",
+                "パターン「{name}」の設定を削除しますか?フォルダ内のファイルは削除されません。"
+            ))
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if answer == rfd::MessageDialogResult::Yes {
+            self.config.patterns.remove(self.selected);
+            self.selected = self
+                .selected
+                .min(self.config.patterns.len().saturating_sub(1));
+            self.sync_excludes_text();
+            self.clear_preview();
+            self.touch();
+        }
+    }
+
+    fn editor(&mut self, ui: &mut egui::Ui) {
+        let mut changed = false;
+        let mut save_file = false;
+        let mut delete = false;
+        let can_delete = self.file_mode.is_none();
+        let Some(pattern) = self.config.patterns.get_mut(self.selected) else {
+            card().show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.label(tr(
+                    "Press New pattern to get started.",
+                    "「新規パターン」を押して始めてください",
+                ));
             });
-        if let Some(i) = remove {
-            pattern.pairs.remove(i);
-            changed = true;
-        }
-        if ui.button("フォルダの組を追加").clicked() {
-            pattern.pairs.push(FolderPair::default());
-            changed = true;
-        }
-        ui.add_space(4.0);
-        ui.label("除外パターン(1行に1つ。例: *.tmp / node_modules / build/ / docs/draft)");
-        let response = ui.add(
-            egui::TextEdit::multiline(&mut self.excludes_text)
-                .desired_rows(3)
-                .desired_width(f32::INFINITY),
-        );
-        if response.changed() {
-            pattern.excludes = self.excludes_text.lines().map(str::to_owned).collect();
-            changed = true;
-        }
+            return;
+        };
+        card().show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let buttons = if can_delete { 230.0 } else { 120.0 };
+                changed |= ui
+                    .add(
+                        egui::TextEdit::singleline(&mut pattern.name)
+                            .desired_width((ui.available_width() - buttons).max(120.0))
+                            .font(egui::TextStyle::Heading),
+                    )
+                    .changed();
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if can_delete && ui.button(tr("Delete", "削除")).clicked() {
+                        delete = true;
+                    }
+                    if ui.button(tr("Save as file", "ファイルに保存")).clicked() {
+                        save_file = true;
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            changed |= folder_table(ui, &mut pattern.pairs);
+            ui.add_space(6.0);
+            section_title(ui, tr("EXCLUSIONS", "除外"));
+            let response = ui.add(
+                egui::TextEdit::multiline(&mut self.excludes_text)
+                    .desired_rows(2)
+                    .desired_width(f32::INFINITY)
+                    .hint_text(tr(
+                        "None. To exclude items, add one per line, such as *.tmp or build/",
+                        "なし。除外するときは1行に1つ書きます(例: *.tmp、build/)",
+                    )),
+            );
+            if response.changed() {
+                pattern.excludes = self.excludes_text.lines().map(str::to_owned).collect();
+                changed = true;
+            }
+            egui::CollapsingHeader::new(tr("Advanced", "詳細設定"))
+                .id_salt("advanced")
+                .show(ui, |ui| {
+                    changed |= ui
+                        .checkbox(
+                            &mut pattern.run_on_open,
+                            tr(
+                                "Run right away when this pattern's file is opened (otherwise preview)",
+                                "パターンファイルを開いたらすぐ実行する(オフならプレビュー)",
+                            ),
+                        )
+                        .on_hover_text(tr(
+                            "Safety checks still stop the run.",
+                            "この場合も安全装置は働きます",
+                        ))
+                        .changed();
+                    ui.horizontal(|ui| {
+                        ui.label(tr("Full check every", "フルチェックの間隔"));
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut pattern.full_check_days).range(0..=3650))
+                            .changed();
+                        ui.label(tr(
+                            "days (0 turns the cache off)",
+                            "日(0でキャッシュを使わない)",
+                        ));
+                    });
+                    for (i, pair) in pattern.pairs.iter_mut().enumerate() {
+                        ui.push_id(i, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(trf!(
+                                    "Pair {} exclusions",
+                                    "{} 組目だけの除外",
+                                    i + 1
+                                ));
+                                let mut text = pair.excludes.join("; ");
+                                if ui
+                                    .add(
+                                        egui::TextEdit::singleline(&mut text)
+                                            .desired_width(f32::INFINITY)
+                                            .hint_text(tr("Separate with ;", "; で区切ります")),
+                                    )
+                                    .changed()
+                                {
+                                    pair.excludes = text
+                                        .split(';')
+                                        .map(|s| s.trim_start().to_owned())
+                                        .collect();
+                                    if pair.excludes.iter().all(String::is_empty) {
+                                        pair.excludes.clear();
+                                    }
+                                    changed = true;
+                                }
+                            });
+                        });
+                    }
+                });
+        });
         if changed {
             self.touch();
             self.clear_preview();
         }
+        if save_file {
+            self.export_pattern();
+        }
+        if delete {
+            self.confirm_remove_pattern();
+        }
     }
 
-    fn action_bar(&mut self, ui: &mut egui::Ui, ui_ctx: &egui::Context) {
-        let busy = self.job.is_some();
-        let has_pattern = self.selected < self.config.patterns.len();
+    fn tab_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(!busy && has_pattern, |ui| {
-                if ui.button("プレビュー").clicked() {
-                    self.start_preview(ui_ctx);
-                }
-                if ui.button("実行").clicked() {
-                    self.start_run(ui_ctx);
-                }
-                ui.checkbox(&mut self.full_check, "フルチェック(保存先も全部読む)");
-            });
-            if busy && ui.button("中止").clicked() {
-                if let Some((ctx, _)) = &self.job {
-                    ctx.cancel.store(true, Ordering::Relaxed);
-                }
-            }
-        });
-        let Some(plans) = &self.plans else {
-            return;
-        };
-        let guards: Vec<String> = plans.iter().filter_map(|p| p.guard.clone()).collect();
-        let summary: Vec<String> = plans.iter().map(describe_plan).collect();
-        for line in summary {
-            ui.label(line);
-        }
-        for guard in &guards {
-            ui.colored_label(
-                egui::Color32::from_rgb(220, 70, 60),
-                format!("安全装置: {guard}"),
-            );
-        }
-        ui.horizontal(|ui| {
-            if !guards.is_empty() {
-                ui.checkbox(
-                    &mut self.allow_guarded,
-                    "内容を確認したので、この削除を許可する",
-                );
-            }
-            let ready = !busy && (guards.is_empty() || self.allow_guarded);
-            if ui
-                .add_enabled(ready, egui::Button::new("この内容で実行"))
-                .clicked()
-            {
-                self.start_execute(ui_ctx);
-            }
-        });
-        let height = ui.text_style_height(&egui::TextStyle::Body);
-        egui::ScrollArea::both()
-            .id_salt("rows")
-            .max_height(ui.available_height().max(60.0))
-            .auto_shrink([false, false])
-            .show_rows(ui, height, self.rows.len(), |ui, range| {
-                for row in &self.rows[range] {
-                    ui.add(egui::Label::new(row.as_str()).extend());
-                }
-            });
-    }
-
-    fn progress_panel(&self, ui: &mut egui::Ui) {
-        if let Some((ctx, _)) = &self.job {
-            let p = &ctx.progress;
-            match p.phase() {
-                Phase::Scanning | Phase::Idle => {
-                    ui.label(format!(
-                        "比較中: 元 {} 件 / 保存先 {} 件",
-                        p.source_entries.load(Ordering::Relaxed),
-                        p.dest_entries.load(Ordering::Relaxed)
-                    ));
-                }
-                Phase::Copying => {
-                    let done = p.bytes_done.load(Ordering::Relaxed);
-                    let total = p.bytes_total.load(Ordering::Relaxed).max(1);
-                    ui.add(
-                        egui::ProgressBar::new(done as f32 / total as f32).text(format!(
-                            "コピー中: {} / {} ファイル, {} / {}",
-                            p.files_done.load(Ordering::Relaxed),
-                            p.files_total.load(Ordering::Relaxed),
-                            format_bytes(done),
-                            format_bytes(total)
-                        )),
+            for (tab, label) in [
+                (Tab::Run, tr("Run", "実行")),
+                (Tab::Settings, tr("Pattern settings", "パターン設定")),
+            ] {
+                let selected = self.tab == tab;
+                let text = RichText::new(label).size(15.0).strong();
+                let text = if selected {
+                    text.color(ACCENT)
+                } else {
+                    text.color(MUTED)
+                };
+                let response = ui.add(egui::Button::new(text).frame(false));
+                if selected {
+                    let rect = response.rect;
+                    ui.painter().hline(
+                        rect.x_range(),
+                        rect.bottom() + 1.0,
+                        Stroke::new(2.0, ACCENT),
                     );
                 }
-                Phase::Deleting => {
-                    ui.label(format!(
-                        "削除中: {} / {} 件",
-                        p.deletes_done.load(Ordering::Relaxed),
-                        p.deletes_total.load(Ordering::Relaxed)
-                    ));
+                if response.clicked() {
+                    self.tab = tab;
                 }
             }
-        }
-        egui::ScrollArea::vertical()
-            .id_salt("log")
-            .stick_to_bottom(true)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for line in &self.log {
-                    ui.add(egui::Label::new(line.as_str()).wrap());
-                }
+        });
+        ui.separator();
+    }
+
+    /// What the Run tab will act on, read-only.
+    fn run_summary(&self, ui: &mut egui::Ui) {
+        let Some(pattern) = self.config.patterns.get(self.selected) else {
+            card().show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.label(tr(
+                    "Press New pattern to get started.",
+                    "「新規パターン」を押して始めてください",
+                ));
             });
+            return;
+        };
+        card().show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(RichText::new(pattern.name.as_str()).heading());
+            let empty = |text: &str| text.trim().is_empty();
+            if pattern
+                .pairs
+                .iter()
+                .all(|p| empty(&p.source) && empty(&p.dest))
+            {
+                ui.label(
+                    RichText::new(tr(
+                        "No folders yet. Choose them in Pattern settings.",
+                        "フォルダが未設定です。「パターン設定」で選んでください",
+                    ))
+                    .color(MUTED),
+                );
+            }
+            for pair in &pattern.pairs {
+                if empty(&pair.source) && empty(&pair.dest) {
+                    continue;
+                }
+                let line = format!("{}  →  {}", pair.source, pair.dest);
+                ui.add(egui::Label::new(RichText::new(line).color(MUTED)).truncate());
+            }
+            let excludes = pattern
+                .excludes
+                .iter()
+                .filter(|e| !e.trim().is_empty())
+                .count();
+            if excludes > 0 {
+                ui.label(
+                    RichText::new(trf!("{excludes} exclusions", "除外 {excludes} 件"))
+                        .color(MUTED)
+                        .size(12.0),
+                );
+            }
+        });
+    }
+
+    fn results(&mut self, ui: &mut egui::Ui) {
+        let Some(plans) = &self.plans else {
+            ui.add_space(28.0);
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    RichText::new(tr(
+                        "Preview shows what will be copied and deleted, before anything changes.",
+                        "プレビューでは、変更する前にコピーと削除の内容を確認できます",
+                    ))
+                    .color(MUTED),
+                );
+            });
+            return;
+        };
+        let copies: usize = plans.iter().map(|p| p.copies.len()).sum();
+        let bytes: u64 = plans.iter().map(|p| p.stats.copy_bytes).sum();
+        let deletes: usize = plans.iter().map(Plan::delete_count).sum();
+        let unchanged: u64 = plans.iter().map(|p| p.stats.unchanged).sum();
+        let cached = plans.iter().all(|p| p.dest_scan == DestScan::Cached);
+        let reason = plans.iter().find_map(|p| match &p.dest_scan {
+            DestScan::Full(reason) => Some(reason.clone()),
+            DestScan::Cached => None,
+        });
+        let guards: Vec<String> = plans.iter().filter_map(|p| p.guard.clone()).collect();
+
+        ui.columns(4, |columns| {
+            tile(
+                &mut columns[0],
+                tr("Copy", "コピー"),
+                copies.to_string(),
+                Some(format_bytes(bytes)),
+                GREEN,
+            );
+            tile(
+                &mut columns[1],
+                tr("Delete", "削除"),
+                deletes.to_string(),
+                None,
+                if deletes > 0 { RED } else { TEXT },
+            );
+            tile(
+                &mut columns[2],
+                tr("Unchanged", "変更なし"),
+                unchanged.to_string(),
+                None,
+                TEXT,
+            );
+            let how = if cached {
+                tr("Cache", "キャッシュ")
+            } else {
+                tr("Full", "全一覧")
+            };
+            tile(
+                &mut columns[3],
+                tr("Destination read", "保存先の読み方"),
+                how.to_owned(),
+                reason,
+                ACCENT,
+            );
+        });
+
+        if !guards.is_empty() {
+            Frame::new()
+                .fill(RED_SOFT)
+                .stroke(Stroke::new(1.0, RED))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    for guard in &guards {
+                        ui.label(RichText::new(guard).color(RED));
+                    }
+                    ui.checkbox(
+                        &mut self.allow_guarded,
+                        tr(
+                            "I checked this and allow these changes",
+                            "内容を確認したので、この変更を許可する",
+                        ),
+                    );
+                });
+        }
+
+        if self.rows.is_empty() {
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new(tr("Nothing to do.", "変更はありません")).color(MUTED));
+            });
+            return;
+        }
+        let height = ui.text_style_height(&egui::TextStyle::Body) + 6.0;
+        card().inner_margin(8).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            egui::ScrollArea::both()
+                .id_salt("rows")
+                .auto_shrink([false, false])
+                .show_rows(ui, height, self.rows.len(), |ui, range| {
+                    for (kind, text) in &self.rows[range] {
+                        ui.horizontal(|ui| {
+                            ui.set_height(height);
+                            fixed_label(
+                                ui,
+                                64.0,
+                                RichText::new(kind.label()).color(kind.color()).strong(),
+                            );
+                            ui.add(egui::Label::new(text.as_str()).extend());
+                        });
+                    }
+                });
+        });
+    }
+
+    fn footer(&mut self, ui: &mut egui::Ui, ui_ctx: &egui::Context) {
+        ui.add_space(6.0);
+        egui::CollapsingHeader::new(trf!("Log ({})", "ログ ({})", self.log.len()))
+            .id_salt("log")
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("log-lines")
+                    .max_height(130.0)
+                    .stick_to_bottom(true)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for line in &self.log {
+                            ui.add(egui::Label::new(line.as_str()).wrap());
+                        }
+                    });
+            });
+        let busy = self.job.is_some();
+        let has_pattern = self.selected < self.config.patterns.len();
+        let has_plan = self.plans.is_some();
+        let blocked = self
+            .plans
+            .as_ref()
+            .is_some_and(|plans| plans.iter().any(|p| p.guard.is_some()) && !self.allow_guarded);
+        let nothing = self
+            .plans
+            .as_ref()
+            .is_some_and(|plans| !plans.iter().any(Plan::has_work));
+        let on_run_tab = self.tab == Tab::Run;
+        let bar = egui::vec2(ui.available_width(), 34.0);
+        ui.allocate_ui_with_layout(
+            bar,
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if !on_run_tab {
+                    if ui
+                        .add_enabled(has_pattern, primary(tr("Done", "完了")))
+                        .clicked()
+                    {
+                        self.tab = Tab::Run;
+                    }
+                } else if busy {
+                    if ui.button(tr("Stop", "中止")).clicked() {
+                        if let Some((ctx, _)) = &self.job {
+                            ctx.cancel.store(true, Ordering::Relaxed);
+                        }
+                    }
+                    ui.spinner();
+                } else {
+                    let label = if has_plan {
+                        tr("Run this plan", "この内容で実行")
+                    } else {
+                        tr("Run", "実行")
+                    };
+                    let ready = has_pattern && !blocked && !nothing;
+                    if ui.add_enabled(ready, primary(label)).clicked() {
+                        if has_plan {
+                            self.start_execute(ui_ctx);
+                        } else {
+                            self.start_run(ui_ctx);
+                        }
+                    }
+                    if ui
+                        .add_enabled(has_pattern, egui::Button::new(tr("Preview", "プレビュー")))
+                        .clicked()
+                    {
+                        self.start_preview(ui_ctx);
+                    }
+                    let full = ui
+                        .add_enabled(
+                            has_pattern,
+                            egui::Checkbox::new(
+                                &mut self.full_check,
+                                tr("Full check", "フルチェック"),
+                            ),
+                        )
+                        .on_hover_text(tr(
+                            "Read the destination from disk instead of the saved state",
+                            "記録を使わず、保存先もディスクから読みます",
+                        ));
+                    if full.changed() {
+                        self.clear_preview();
+                    }
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    self.status_line(ui);
+                });
+            },
+        );
+        ui.add_space(6.0);
+    }
+
+    fn status_line(&self, ui: &mut egui::Ui) {
+        let Some((ctx, _)) = &self.job else {
+            let text = self
+                .log
+                .last()
+                .map_or(tr("Ready", "準備完了"), String::as_str);
+            ui.add(egui::Label::new(RichText::new(text).color(MUTED)).truncate());
+            return;
+        };
+        let p = &ctx.progress;
+        match p.phase() {
+            Phase::Scanning | Phase::Idle => {
+                let (source, dest) = (
+                    p.source_entries.load(Ordering::Relaxed),
+                    p.dest_entries.load(Ordering::Relaxed),
+                );
+                ui.add(
+                    egui::Label::new(trf!(
+                        "Comparing: source {source}, destination {dest}",
+                        "比較中: 元 {source} 件、保存先 {dest} 件"
+                    ))
+                    .truncate(),
+                );
+            }
+            Phase::Copying => {
+                let done = p.bytes_done.load(Ordering::Relaxed);
+                let total = p.bytes_total.load(Ordering::Relaxed).max(1);
+                let (files, all) = (
+                    p.files_done.load(Ordering::Relaxed),
+                    p.files_total.load(Ordering::Relaxed),
+                );
+                let (done_text, total_text) = (format_bytes(done), format_bytes(total));
+                ui.add(
+                    egui::ProgressBar::new(done as f32 / total as f32).text(trf!(
+                        "Copying {files} / {all} files, {done_text} / {total_text}",
+                        "コピー中 {files} / {all} ファイル、{done_text} / {total_text}"
+                    )),
+                );
+            }
+            Phase::Deleting => {
+                let (done, all) = (
+                    p.deletes_done.load(Ordering::Relaxed),
+                    p.deletes_total.load(Ordering::Relaxed),
+                );
+                ui.label(trf!("Deleting {done} / {all}", "削除中 {done} / {all}"));
+            }
+        }
     }
 }
 
@@ -568,60 +1193,121 @@ fn browse(current: &str) -> Option<String> {
     dialog.pick_folder().map(|p| p.display().to_string())
 }
 
-fn pair_row(
-    ui: &mut egui::Ui,
-    pair: &mut FolderPair,
-    remove: &mut Option<usize>,
-    i: usize,
-) -> bool {
+fn fixed_label(ui: &mut egui::Ui, width: f32, text: impl Into<egui::WidgetText>) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, ui.spacing().interact_size.y),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            ui.add(egui::Label::new(text).truncate());
+        },
+    );
+}
+
+/// Source and destination side by side, one row per folder pair.
+fn folder_table(ui: &mut egui::Ui, pairs: &mut Vec<FolderPair>) -> bool {
+    const BROWSE: f32 = 72.0;
+    const ARROW: f32 = 18.0;
+    const REMOVE: f32 = 28.0;
+    let gap = ui.spacing().item_spacing.x;
+    let field =
+        ((ui.available_width() - BROWSE * 2.0 - ARROW - REMOVE - gap * 5.0) / 2.0).max(90.0);
     let mut changed = false;
+    let mut remove = None;
     ui.horizontal(|ui| {
-        let width = ((ui.available_width() - 190.0) / 2.0).max(80.0);
-        changed |= ui
-            .add(
-                egui::TextEdit::singleline(&mut pair.source)
-                    .desired_width(width)
-                    .hint_text("元フォルダ"),
-            )
-            .changed();
-        if ui.small_button("参照").clicked() {
-            if let Some(path) = browse(&pair.source) {
-                pair.source = path;
-                changed = true;
-            }
-        }
-        ui.label("->");
-        changed |= ui
-            .add(
-                egui::TextEdit::singleline(&mut pair.dest)
-                    .desired_width(width)
-                    .hint_text("保存先フォルダ"),
-            )
-            .changed();
-        if ui.small_button("参照").clicked() {
-            if let Some(path) = browse(&pair.dest) {
-                pair.dest = path;
-                changed = true;
-            }
-        }
-        if ui.small_button("外す").clicked() {
-            *remove = Some(i);
-        }
+        fixed_label(
+            ui,
+            field + BROWSE + gap + ARROW + gap,
+            RichText::new(tr("SOURCE", "元"))
+                .color(MUTED)
+                .size(12.5)
+                .strong(),
+        );
+        fixed_label(
+            ui,
+            field,
+            RichText::new(tr("DESTINATION", "保存先"))
+                .color(MUTED)
+                .size(12.5)
+                .strong(),
+        );
     });
-    ui.horizontal(|ui| {
-        ui.label("  この組だけの除外(;区切り)");
-        let mut text = pair.excludes.join("; ");
-        if ui
-            .add(egui::TextEdit::singleline(&mut text).desired_width(f32::INFINITY))
-            .changed()
-        {
-            pair.excludes = text.split(';').map(|s| s.trim_start().to_owned()).collect();
-            if pair.excludes.iter().all(String::is_empty) {
-                pair.excludes.clear();
-            }
+    let height = ui.spacing().interact_size.y;
+    let removable = pairs.len() > 1;
+    for (i, pair) in pairs.iter_mut().enumerate() {
+        ui.push_id(i, |ui| {
+            let row = egui::vec2(ui.available_width(), height + 6.0);
+            let layout = egui::Layout::left_to_right(egui::Align::Center);
+            ui.allocate_ui_with_layout(row, layout, |ui| {
+                changed |= path_field(
+                    ui,
+                    &mut pair.source,
+                    tr("Folder to back up", "バックアップするフォルダ"),
+                    field,
+                    BROWSE,
+                );
+                ui.add_sized(
+                    [ARROW, height],
+                    egui::Label::new(RichText::new("→").color(MUTED)),
+                );
+                changed |= path_field(
+                    ui,
+                    &mut pair.dest,
+                    tr("Mirror folder", "ミラー先のフォルダ"),
+                    field,
+                    BROWSE,
+                );
+                if removable
+                    && ui
+                        .add_sized([REMOVE, height], egui::Button::new("×"))
+                        .on_hover_text(tr("Remove this pair", "この組を外す"))
+                        .clicked()
+                {
+                    remove = Some(i);
+                }
+            });
+        });
+    }
+    if let Some(i) = remove {
+        pairs.remove(i);
+        changed = true;
+    }
+    if ui
+        .button(tr("Add folder pair", "フォルダの組を追加"))
+        .clicked()
+    {
+        pairs.push(FolderPair::default());
+        changed = true;
+    }
+    changed
+}
+
+fn path_field(
+    ui: &mut egui::Ui,
+    value: &mut String,
+    hint: &str,
+    width: f32,
+    browse_width: f32,
+) -> bool {
+    let height = ui.spacing().interact_size.y;
+    let mut changed = ui
+        .add_sized(
+            [width, height],
+            egui::TextEdit::singleline(value).hint_text(hint),
+        )
+        .changed();
+    if ui
+        .add_sized(
+            [browse_width, height],
+            egui::Button::new(tr("Browse", "参照")),
+        )
+        .clicked()
+    {
+        if let Some(path) = browse(value) {
+            *value = path;
             changed = true;
         }
-    });
+    }
     changed
 }
 
@@ -629,6 +1315,13 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ui_ctx = ui.ctx().clone();
         self.poll_job();
+        if let Some(run) = self.auto_start.take() {
+            if run {
+                self.start_run(&ui_ctx);
+            } else {
+                self.start_preview(&ui_ctx);
+            }
+        }
         if self.job.is_some() {
             ui_ctx.request_repaint_after(Duration::from_millis(100));
         }
@@ -641,23 +1334,37 @@ impl eframe::App for App {
         }
 
         egui::Panel::left("patterns")
-            .default_size(170.0)
-            .show(ui, |ui| self.patterns_panel(ui));
-        egui::Panel::bottom("log")
-            .default_size(150.0)
-            .resizable(true)
-            .show(ui, |ui| self.progress_panel(ui));
+            .default_size(180.0)
+            .resizable(false)
+            .show(ui, |ui| self.sidebar(ui));
+        egui::Panel::bottom("footer").show(ui, |ui| self.footer(ui, &ui_ctx));
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(error) = &self.load_error {
                 ui.colored_label(
-                    egui::Color32::from_rgb(220, 70, 60),
-                    format!("設定を読み込めないため、保存を止めています: {error}"),
+                    RED,
+                    trf!(
+                        "Settings could not be read, so saving is off: {error}",
+                        "設定を読み込めないため、保存を止めています: {error}"
+                    ),
                 );
             }
-            let busy = self.job.is_some();
-            ui.add_enabled_ui(!busy, |ui| self.pattern_editor(ui));
-            ui.separator();
-            self.action_bar(ui, &ui_ctx);
+            self.tab_bar(ui);
+            match self.tab {
+                Tab::Run => {
+                    self.run_summary(ui);
+                    self.results(ui);
+                }
+                Tab::Settings => {
+                    let busy = self.job.is_some();
+                    egui::ScrollArea::vertical()
+                        .id_salt("editor")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_max_width(ui.available_width() - 16.0);
+                            ui.add_enabled_ui(!busy, |ui| self.editor(ui));
+                        });
+                }
+            }
         });
     }
 
@@ -669,16 +1376,21 @@ impl eframe::App for App {
 }
 
 fn main() -> eframe::Result {
+    let file = std::env::args_os().nth(1).map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Hayakagami")
-            .with_inner_size([980.0, 680.0])
-            .with_min_inner_size([640.0, 480.0]),
+            .with_inner_size([980.0, 720.0])
+            .with_min_inner_size([720.0, 520.0])
+            .with_icon(Arc::new(
+                eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon-256.png"))
+                    .expect("the bundled icon is a valid PNG"),
+            )),
         ..Default::default()
     };
     eframe::run_native(
         "Hayakagami",
         options,
-        Box::new(|cc| Ok(Box::new(App::new(cc)))),
+        Box::new(|cc| Ok(Box::new(App::new(cc, file)))),
     )
 }

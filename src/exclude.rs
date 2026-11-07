@@ -35,14 +35,22 @@ impl Excludes {
                 .case_insensitive(true)
                 .literal_separator(true)
                 .build()
-                .map_err(|e| format!("除外パターン `{raw}` が不正です: {e}"))?;
+                .map_err(|e| {
+                    crate::trf!(
+                        "Invalid exclusion pattern `{raw}`: {e}",
+                        "除外パターン `{raw}` が不正です: {e}"
+                    )
+                })?;
             if dir_only {
                 dirs.add(built);
             } else {
                 any.add(built);
             }
         }
-        let finish = |b: GlobSetBuilder| b.build().map_err(|e| format!("除外パターンエラー: {e}"));
+        let finish = |b: GlobSetBuilder| {
+            b.build()
+                .map_err(|e| crate::trf!("Exclusion pattern error: {e}", "除外パターンエラー: {e}"))
+        };
         Ok(Self {
             any: finish(any)?,
             dirs: finish(dirs)?,

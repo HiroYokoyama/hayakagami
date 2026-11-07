@@ -5,9 +5,11 @@
 //! runs after copying unless the disk lacks the space for that order.
 
 use crate::cache::{self, CacheFile};
+use crate::i18n::tr;
 use crate::model::*;
 use crate::plan::Plan;
 use crate::platform;
+use crate::trf;
 use std::collections::HashSet;
 use std::fs;
 use std::io;
@@ -34,8 +36,11 @@ struct Shared<'a> {
 impl Shared<'_> {
     fn fail(&self, rel: &Path, action: &str, error: &io::Error) {
         self.ctx.progress.errors.fetch_add(1, Ordering::Relaxed);
-        self.ctx
-            .log(format!("エラー({action}): {}: {error}", rel.display()));
+        self.ctx.log(trf!(
+            "Error ({action}): {}: {error}",
+            "エラー({action}): {}: {error}",
+            rel.display()
+        ));
         self.evict_parent(rel);
     }
 
@@ -89,7 +94,7 @@ fn remove_files(root: &Path, files: &[PathBuf], shared: &Shared) {
                     .deletes_done
                     .fetch_add(1, Ordering::Relaxed);
             }
-            Err(e) => shared.fail(rel, "削除", &e),
+            Err(e) => shared.fail(rel, tr("delete", "削除"), &e),
         }
     }
 }
@@ -106,7 +111,7 @@ fn remove_dirs(root: &Path, dirs: &[PathBuf], shared: &Shared) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty => shared.evict_parent(rel),
-            Err(e) => shared.fail(rel, "フォルダ削除", &e),
+            Err(e) => shared.fail(rel, tr("delete folder", "フォルダ削除"), &e),
         }
     }
 }
@@ -153,7 +158,7 @@ fn copy_all(plan: &Plan, shared: &Shared) {
                         if e.kind() == io::ErrorKind::StorageFull {
                             shared.disk_full.store(true, Ordering::Relaxed);
                         }
-                        shared.fail(&item.rel, "コピー", &e);
+                        shared.fail(&item.rel, tr("copy", "コピー"), &e);
                     }
                 }
             });
@@ -167,9 +172,10 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
         return Err(MirrorError::Guard(reason.clone()));
     }
     fs::create_dir_all(&plan.dest).map_err(|e| {
-        MirrorError::Fatal(format!(
+        MirrorError::Fatal(trf!(
+            "Cannot create the destination: {}: {e}",
             "保存先を作成できません: {}: {e}",
-            plan.dest.display()
+            display_path(&plan.dest)
         ))
     })?;
     if !plan.has_work() && matches!(plan.dest_scan, crate::plan::DestScan::Cached) {
@@ -182,9 +188,10 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
     // From here until the clean finish, the cache is not trusted.
     let running = format!("running-{}", cache::new_run_id());
     cache::write_marker(&plan.dest, &running).map_err(|e| {
-        MirrorError::Fatal(format!(
+        MirrorError::Fatal(trf!(
+            "Cannot write to the destination: {}: {e}",
             "保存先に書き込めません: {}: {e}",
-            plan.dest.display()
+            display_path(&plan.dest)
         ))
     })?;
 
@@ -217,7 +224,10 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
     let delete_first =
         platform::free_space(&plan.dest).is_some_and(|free| free < plan.stats.copy_bytes);
     if delete_first {
-        ctx.log("空き容量が足りないため、先に削除します");
+        ctx.log(tr(
+            "Not enough free space: deleting before copying",
+            "空き容量が足りないため、先に削除します",
+        ));
         progress.set_phase(Phase::Deleting);
         remove_files(&plan.dest, &plan.delete_files, &shared);
         remove_dirs(&plan.dest, &plan.delete_dirs, &shared);
@@ -229,12 +239,15 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
             break;
         }
         if let Err(e) = fs::create_dir_all(plan.dest.join(rel)) {
-            shared.fail(rel, "フォルダ作成", &e);
+            shared.fail(rel, tr("create folder", "フォルダ作成"), &e);
         }
     }
     copy_all(&plan, &shared);
     if shared.disk_full.load(Ordering::Relaxed) {
-        ctx.log("保存先の空き容量がなくなったため、コピーを中断しました");
+        ctx.log(tr(
+            "The destination is full: copying stopped",
+            "保存先の空き容量がなくなったため、コピーを中断しました",
+        ));
     }
 
     if !delete_first {
@@ -273,10 +286,16 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
         match cache::save(&plan.cache_file, &cache_file) {
             Ok(()) => {
                 if let Err(e) = cache::write_marker(&plan.dest, &run_id) {
-                    ctx.log(format!("状態を記録できませんでした: {e}"));
+                    ctx.log(trf!(
+                        "Could not record the state: {e}",
+                        "状態を記録できませんでした: {e}"
+                    ));
                 }
             }
-            Err(e) => ctx.log(format!("キャッシュを保存できませんでした: {e}")),
+            Err(e) => ctx.log(trf!(
+                "Could not save the cache: {e}",
+                "キャッシュを保存できませんでした: {e}"
+            )),
         }
     } else if !plan.cache_enabled {
         cache::discard(&plan.cache_file);

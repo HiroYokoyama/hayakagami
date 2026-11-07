@@ -91,7 +91,7 @@ def main():
         _, cached_output = timed(mirror)
         print(full_output)
         print(cached_output)
-        if "キャッシュ" not in cached_output:
+        if "destination: cache" not in cached_output:
             raise SystemExit("the cache was not used on the repeated run")
 
         label, baseline, accepted = baseline_command(source, dest)

@@ -39,7 +39,11 @@ windows-sys = { version = "0.61", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
     "Win32_System_Ioctl",
+    "Win32_UI_Shell",
 ] }
+
+[build-dependencies]
+winresource = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

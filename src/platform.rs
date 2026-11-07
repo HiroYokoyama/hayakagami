@@ -101,6 +101,64 @@ mod windows_impl {
     const PROGRESS_CONTINUE: u32 = 0;
     const PROGRESS_CANCEL: u32 = 1;
 
+    const CLASS_KEY: &str = r"HKCU\Software\Classes\Hayakagami.Pattern";
+    const EXTENSION_KEY: &str = r"HKCU\Software\Classes\.hkgm";
+
+    fn run_reg(args: &[&str]) -> io::Result<()> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let output = std::process::Command::new("reg")
+            .args(args)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other(
+                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            ))
+        }
+    }
+
+    fn notify_shell() {
+        use windows_sys::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+        unsafe {
+            SHChangeNotify(
+                SHCNE_ASSOCCHANGED as i32,
+                SHCNF_IDLIST,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+    }
+
+    /// Opens .hkgm files with `exe`, for this user only. No administrator rights are needed.
+    pub fn register_file_type(exe: &Path) -> io::Result<()> {
+        let exe = exe.display().to_string();
+        let command = format!("\"{exe}\" \"%1\"");
+        let icon = format!("{exe},0");
+        let command_key = format!(r"{CLASS_KEY}\shell\open\command");
+        let icon_key = format!(r"{CLASS_KEY}\DefaultIcon");
+        for (key, value) in [
+            (EXTENSION_KEY, "Hayakagami.Pattern"),
+            (CLASS_KEY, "Hayakagami pattern"),
+            (icon_key.as_str(), icon.as_str()),
+            (command_key.as_str(), command.as_str()),
+        ] {
+            run_reg(&["add", key, "/ve", "/d", value, "/f"])?;
+        }
+        notify_shell();
+        Ok(())
+    }
+
+    /// Removes what `register_file_type` added.
+    pub fn unregister_file_type() -> io::Result<()> {
+        let first = run_reg(&["delete", EXTENSION_KEY, "/f"]);
+        let second = run_reg(&["delete", CLASS_KEY, "/f"]);
+        notify_shell();
+        first.and(second)
+    }
+
     fn wide(path: &OsStr) -> Vec<u16> {
         path.encode_wide().chain(std::iter::once(0)).collect()
     }
@@ -460,6 +518,15 @@ mod unix_impl {
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
         let rc = unsafe { libc::statvfs(bytes.as_ptr().cast(), &mut stat) };
         (rc == 0).then(|| stat.f_bavail as u64 * stat.f_frsize as u64)
+    }
+
+    /// File type registration is only implemented for Windows.
+    pub fn register_file_type(_exe: &Path) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    pub fn unregister_file_type() -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
     }
 
     pub fn disk_kind(path: &Path) -> DiskKind {

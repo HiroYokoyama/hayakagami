@@ -77,7 +77,7 @@ impl fmt::Display for MirrorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MirrorError::Guard(m) | MirrorError::Fatal(m) => f.write_str(m),
-            MirrorError::Cancelled => f.write_str("中止しました"),
+            MirrorError::Cancelled => f.write_str(crate::i18n::tr("Cancelled", "中止しました")),
         }
     }
 }
@@ -137,6 +137,18 @@ impl Progress {
         ] {
             c.store(0, Ordering::Relaxed);
         }
+    }
+}
+
+/// Path text for people: hides the extended-length prefix Windows paths carry here.
+pub fn display_path(path: &std::path::Path) -> String {
+    let text = path.display().to_string();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        text
     }
 }
 

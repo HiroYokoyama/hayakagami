@@ -437,3 +437,17 @@ fn long_paths_work() {
     exec::execute(plan, &RunContext::silent(), false).unwrap();
     assert!(!f.scan_full().has_work());
 }
+
+#[test]
+fn guard_unknown_destination_protects_files_from_overwrite() {
+    let f = Fixture::new();
+    write(&f.source.join("a.txt"), "new content");
+    write(&f.dest.join("a.txt"), "existing data");
+    let plan = f.scan();
+    assert!(plan.guard.is_some());
+    assert!(exec::execute(plan, &RunContext::silent(), false).is_err());
+    assert_eq!(
+        fs::read_to_string(f.dest.join("a.txt")).unwrap(),
+        "existing data"
+    );
+}
