@@ -11,7 +11,7 @@ Issues and pull requests can be written in English or Japanese.
 
 ## Setting up
 
-You need Rust 1.85 or later. Linux also needs `libgtk-3-dev`, `libxkbcommon-dev` and `libgl1-mesa-dev`.
+You need Rust 1.95 or later. Linux also needs `libgtk-3-dev`, `libxkbcommon-dev` and `libgl1-mesa-dev`.
 
 ```bash
 cargo build
