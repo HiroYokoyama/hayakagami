@@ -186,6 +186,10 @@ Linux needs `libgtk-3-dev`, `libxkbcommon-dev` and `libgl1-mesa-dev`.
 - `scripts/make_icon.py` generates the icons in `assets/` (requires Pillow).
 - `scripts/third_party_notices.py` collects the licenses of the crates for release archives.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report anything that could lose data as described in [SECURITY.md](SECURITY.md). Changes between versions are in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 Copyright (C) 2026 HiroYokoyama

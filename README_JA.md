@@ -184,6 +184,10 @@ Linuxでは `libgtk-3-dev`、`libxkbcommon-dev`、`libgl1-mesa-dev` が必要で
 - `scripts/make_icon.py`: `assets/` のアイコンを生成します(Pillowが必要)。
 - `scripts/third_party_notices.py`: 配布ファイルに入れる、依存クレートのライセンスを集めます。
 
+## 開発への参加
+
+[CONTRIBUTING.md](CONTRIBUTING.md) をご覧ください(英語)。データを失うおそれのある問題は [SECURITY.md](SECURITY.md) の方法で報告してください。バージョンごとの変更は [CHANGELOG.md](CHANGELOG.md) にあります。
+
 ## ライセンス
 
 Copyright (C) 2026 HiroYokoyama

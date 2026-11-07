@@ -1,0 +1,65 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this can lose or damage data for other people, or is a security problem, please report it privately as described in SECURITY.md.
+        Remove personal folder names from anything you paste.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 0.2.1
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: program
+    attributes:
+      label: Program
+      options:
+        - Desktop app
+        - Command line
+    validations:
+      required: true
+  - type: textarea
+    id: disks
+    attributes:
+      label: Source and destination disks
+      description: The kind of disk and file system, such as an external hard disk with NTFS.
+  - type: checkboxes
+    id: options
+    attributes:
+      label: Options in use
+      options:
+        - label: NTFS change journal
+        - label: Copy links as links
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or output
+      description: The output of the command with -v, or the log in the desktop app.
+      render: text
