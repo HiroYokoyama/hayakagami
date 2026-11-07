@@ -34,10 +34,8 @@ struct Shared<'a> {
 impl Shared<'_> {
     fn fail(&self, rel: &Path, action: &str, error: &io::Error) {
         self.ctx.progress.errors.fetch_add(1, Ordering::Relaxed);
-        self.ctx.log(format!(
-            "エラー({action}): {}: {error}",
-            rel.display()
-        ));
+        self.ctx
+            .log(format!("エラー({action}): {}: {error}", rel.display()));
         self.evict_parent(rel);
     }
 
@@ -85,7 +83,11 @@ fn remove_files(root: &Path, files: &[PathBuf], shared: &Shared) {
         }
         match remove_file(&root.join(rel)) {
             Ok(()) => {
-                shared.ctx.progress.deletes_done.fetch_add(1, Ordering::Relaxed);
+                shared
+                    .ctx
+                    .progress
+                    .deletes_done
+                    .fetch_add(1, Ordering::Relaxed);
             }
             Err(e) => shared.fail(rel, "削除", &e),
         }
@@ -140,7 +142,11 @@ fn copy_all(plan: &Plan, shared: &Shared) {
                 };
                 match copy_one(plan, &item.rel, shared) {
                     Ok(()) => {
-                        shared.ctx.progress.files_done.fetch_add(1, Ordering::Relaxed);
+                        shared
+                            .ctx
+                            .progress
+                            .files_done
+                            .fetch_add(1, Ordering::Relaxed);
                     }
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => return,
                     Err(e) => {
@@ -183,9 +189,15 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
     })?;
 
     let progress = &ctx.progress;
-    progress.files_total.store(plan.copies.len() as u64, Ordering::Relaxed);
-    progress.bytes_total.store(plan.stats.copy_bytes, Ordering::Relaxed);
-    progress.deletes_total.store(plan.delete_count() as u64, Ordering::Relaxed);
+    progress
+        .files_total
+        .store(plan.copies.len() as u64, Ordering::Relaxed);
+    progress
+        .bytes_total
+        .store(plan.stats.copy_bytes, Ordering::Relaxed);
+    progress
+        .deletes_total
+        .store(plan.delete_count() as u64, Ordering::Relaxed);
     progress.files_done.store(0, Ordering::Relaxed);
     progress.bytes_done.store(0, Ordering::Relaxed);
     progress.deletes_done.store(0, Ordering::Relaxed);
@@ -202,7 +214,8 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
     remove_files(&plan.dest, &plan.conflict_files, &shared);
     remove_dirs(&plan.dest, &plan.conflict_dirs, &shared);
 
-    let delete_first = platform::free_space(&plan.dest).is_some_and(|free| free < plan.stats.copy_bytes);
+    let delete_first =
+        platform::free_space(&plan.dest).is_some_and(|free| free < plan.stats.copy_bytes);
     if delete_first {
         ctx.log("空き容量が足りないため、先に削除します");
         progress.set_phase(Phase::Deleting);

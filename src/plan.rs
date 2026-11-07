@@ -296,8 +296,7 @@ impl Walker<'_> {
         if self.excludes.is_empty() {
             return false;
         }
-        self.excludes
-            .matches(&rel_text(&rel.join(name)), is_dir)
+        self.excludes.matches(&rel_text(&rel.join(name)), is_dir)
     }
 
     fn process(&self, node: &Node, source: Listing, dest: Listing) -> Option<()> {
@@ -376,11 +375,14 @@ impl Walker<'_> {
         }
     }
 
-    fn sorted(&self, rel: &Path, items: Vec<Entry>, warnings: &mut Vec<String>) -> Vec<(String, Entry)> {
-        let mut keyed: Vec<(String, Entry)> = items
-            .into_iter()
-            .map(|e| (name_key(&e.name), e))
-            .collect();
+    fn sorted(
+        &self,
+        rel: &Path,
+        items: Vec<Entry>,
+        warnings: &mut Vec<String>,
+    ) -> Vec<(String, Entry)> {
+        let mut keyed: Vec<(String, Entry)> =
+            items.into_iter().map(|e| (name_key(&e.name), e)).collect();
         keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         keyed.dedup_by(|later, first| {
             let same = later.0 == first.0;
@@ -410,11 +412,23 @@ impl Walker<'_> {
             };
             match order {
                 std::cmp::Ordering::Less => {
-                    self.source_only(rel, &source[si].1, &mut local, &mut final_state, &mut children);
+                    self.source_only(
+                        rel,
+                        &source[si].1,
+                        &mut local,
+                        &mut final_state,
+                        &mut children,
+                    );
                     si += 1;
                 }
                 std::cmp::Ordering::Greater => {
-                    self.dest_only(rel, &dest[di].1, &mut local, &mut final_state, &mut children);
+                    self.dest_only(
+                        rel,
+                        &dest[di].1,
+                        &mut local,
+                        &mut final_state,
+                        &mut children,
+                    );
                     di += 1;
                 }
                 std::cmp::Ordering::Equal => {
@@ -478,10 +492,9 @@ impl Walker<'_> {
                 children.push((path, Mode::SourceOnly));
                 state.push(s.clone());
             }
-            Kind::Link | Kind::DirLink => local.warnings.push(format!(
-                "リンクはコピーしません: {}",
-                rel_text(&path)
-            )),
+            Kind::Link | Kind::DirLink => local
+                .warnings
+                .push(format!("リンクはコピーしません: {}", rel_text(&path))),
         }
     }
 
@@ -539,10 +552,9 @@ impl Walker<'_> {
         if s.kind.is_link() || d.kind.is_link() {
             // Links are never followed or replaced: writing through one could
             // reach data outside the mirrored folder.
-            local.warnings.push(format!(
-                "リンクがあるため処理しません: {}",
-                rel_text(&path)
-            ));
+            local
+                .warnings
+                .push(format!("リンクがあるため処理しません: {}", rel_text(&path)));
             state.push(d.clone());
             return;
         }
@@ -715,8 +727,14 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
     };
     let source_disk = platform::disk_kind(&source);
     let dest_disk = platform::disk_kind(&dest_probe);
-    let source_threads = options.scan_threads.unwrap_or(source_disk.scan_threads()).max(1);
-    let dest_threads = options.scan_threads.unwrap_or(dest_disk.scan_threads()).max(1);
+    let source_threads = options
+        .scan_threads
+        .unwrap_or(source_disk.scan_threads())
+        .max(1);
+    let dest_threads = options
+        .scan_threads
+        .unwrap_or(dest_disk.scan_threads())
+        .max(1);
     let copy_threads = options
         .copy_threads
         .unwrap_or(source_disk.copy_threads().min(dest_disk.copy_threads()))
@@ -728,11 +746,11 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
     let dest_existed = dest.is_dir();
     let had_marker = dest_existed && cache::marker_path(&dest).exists();
 
-    let (cached, dest_scan, last_full) =
-        match usable_cache(&dest, options, &volume_id, &cache_file) {
-            Ok(loaded) => (Some(loaded.dirs), DestScan::Cached, loaded.last_full),
-            Err(reason) => (None, DestScan::Full(reason), cache::now_unix()),
-        };
+    let (cached, dest_scan, last_full) = match usable_cache(&dest, options, &volume_id, &cache_file)
+    {
+        Ok(loaded) => (Some(loaded.dirs), DestScan::Cached, loaded.last_full),
+        Err(reason) => (None, DestScan::Full(reason), cache::now_unix()),
+    };
 
     let walker = Walker {
         source: &source,

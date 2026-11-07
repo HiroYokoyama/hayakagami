@@ -82,7 +82,10 @@ fn copies_updates_and_removes() {
     write(&f.source.join("sub/日本語.txt"), "two");
     f.run();
     assert_eq!(fs::read_to_string(f.dest.join("a.txt")).unwrap(), "one");
-    assert_eq!(fs::read_to_string(f.dest.join("sub/日本語.txt")).unwrap(), "two");
+    assert_eq!(
+        fs::read_to_string(f.dest.join("sub/日本語.txt")).unwrap(),
+        "two"
+    );
 
     write(&f.source.join("a.txt"), "changed");
     fs::remove_file(f.source.join("sub/日本語.txt")).unwrap();
@@ -98,8 +101,14 @@ fn modification_time_is_preserved_and_second_run_is_idle() {
     write(&f.source.join("a.txt"), "one");
     set_old_mtime(&f.source.join("a.txt"), 5000);
     f.run();
-    let source_time = fs::metadata(f.source.join("a.txt")).unwrap().modified().unwrap();
-    let dest_time = fs::metadata(f.dest.join("a.txt")).unwrap().modified().unwrap();
+    let source_time = fs::metadata(f.source.join("a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let dest_time = fs::metadata(f.dest.join("a.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
     let gap = source_time
         .duration_since(dest_time)
         .or_else(|e| Ok::<_, ()>(e.duration()))
@@ -145,7 +154,10 @@ fn file_and_folder_can_swap_places() {
     write(&f.source.join("b"), "now file");
     let plan = f.scan();
     exec::execute(plan, &RunContext::silent(), true).unwrap();
-    assert_eq!(fs::read_to_string(f.dest.join("a/inner.txt")).unwrap(), "now dir");
+    assert_eq!(
+        fs::read_to_string(f.dest.join("a/inner.txt")).unwrap(),
+        "now dir"
+    );
     assert_eq!(fs::read_to_string(f.dest.join("b")).unwrap(), "now file");
 }
 
@@ -349,7 +361,10 @@ fn link_in_destination_is_never_followed() {
         "keep me"
     );
     assert!(!outside.join("a.txt").exists());
-    assert!(fs::symlink_metadata(f.dest.join("linked")).unwrap().file_type().is_symlink());
+    assert!(fs::symlink_metadata(f.dest.join("linked"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
     assert!(fs::symlink_metadata(f.dest.join("stray")).is_err());
 }
 

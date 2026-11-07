@@ -11,7 +11,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Parser)]
-#[command(name = "hayakagami", version, about = "フォルダ単位のミラーバックアップ")]
+#[command(
+    name = "hayakagami",
+    version,
+    about = "フォルダ単位のミラーバックアップ"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -94,7 +98,12 @@ fn print_plan(plan: &Plan, verbose: bool, took: f64) {
 }
 
 /// Returns true when everything succeeded.
-fn run_pair(spec: PairSpec, flags: &RunFlags, days: u32, ctx: &RunContext) -> Result<bool, MirrorError> {
+fn run_pair(
+    spec: PairSpec,
+    flags: &RunFlags,
+    days: u32,
+    ctx: &RunContext,
+) -> Result<bool, MirrorError> {
     println!("{} -> {}", spec.source.display(), spec.dest.display());
     let options = ScanOptions {
         force_full: flags.full,
@@ -177,7 +186,7 @@ fn main() -> ExitCode {
             }],
             &flags,
             30,
-            ),
+        ),
         Command::Run { pattern, flags } => {
             let config = match config::load(&config::config_path()) {
                 Ok(c) => c,
