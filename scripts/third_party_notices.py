@@ -35,6 +35,11 @@ def distributed_packages(metadata):
     return seen - set(metadata["workspace_members"])
 
 
+def is_font_notice(path, folder):
+    """Bundled fonts keep their terms in text files beside them."""
+    return path.parent == folder / "fonts" and path.suffix.lower() == ".txt"
+
+
 def license_files(manifest_path):
     """License texts in a crate's folder or one level down, as bundled fonts keep them."""
     folder = Path(manifest_path).parent
@@ -43,8 +48,8 @@ def license_files(manifest_path):
         path
         for path in candidates
         if path.is_file()
-        and path.name.lower().startswith(LICENSE_PREFIXES)
         and path.suffix.lower() not in CODE_SUFFIXES
+        and (path.name.lower().startswith(LICENSE_PREFIXES) or is_font_notice(path, folder))
     )
 
 
@@ -78,7 +83,8 @@ def main():
 
     parts = [
         "Hayakagami is built with the following crates. Where a crate offers a choice",
-        "of licenses, every license it ships is reproduced here.",
+        "of licenses, every license it ships is reproduced here. A crate that ships no",
+        "license text uses a license whose text appears under other crates in this file.",
         "",
     ]
     without_text = 0
