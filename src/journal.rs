@@ -126,9 +126,20 @@ pub fn rel_key(rel: &Path) -> String {
 /// Drops the saved listings that the changes make unreliable. Folders missing
 /// from the map are listed from disk by the walker.
 pub fn forget_changed(saved: &mut DirMap, listed: &HashSet<String>, trees: &HashSet<String>) {
+    // A folder's own date is held by its parent's listing, so that goes as well.
+    let parents: HashSet<&str> = listed
+        .iter()
+        .chain(trees)
+        .filter(|key| !key.is_empty())
+        .map(|key| key.rfind('/').map_or("", |end| &key[..end]))
+        .collect();
     saved.retain(|rel, _| {
         let key = rel_key(rel);
-        if listed.contains(&key) || trees.contains(&key) || trees.contains("") {
+        if listed.contains(&key)
+            || trees.contains(&key)
+            || parents.contains(key.as_str())
+            || trees.contains("")
+        {
             return false;
         }
         !key.match_indices('/')
@@ -690,6 +701,8 @@ mod tests {
                         kind: Kind::File,
                         size: 1,
                         mtime: 1,
+                        created: 0,
+                        attrs: 0,
                     }],
                 )
             })
@@ -766,9 +779,10 @@ mod tests {
         forget_changed(&mut dirs, &set(&["d"]), &set(&["a/b"]));
         let mut left: Vec<String> = dirs.keys().map(|p| rel_key(p)).collect();
         left.sort();
-        // "ab" shares a prefix with "a/b" only as text, and "d/e" is a child of a
-        // folder whose own listing changed, which says nothing about its contents.
-        assert_eq!(left, ["", "a", "ab", "d/e"]);
+        // "" and "a" hold the dates of "d" and "a/b". "ab" shares a prefix with "a/b"
+        // only as text, and "d/e" is a child of a folder whose own listing changed,
+        // which says nothing about its contents.
+        assert_eq!(left, ["ab", "d/e"]);
     }
 
     #[test]

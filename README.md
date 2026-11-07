@@ -120,6 +120,16 @@ New patterns have no exclusions.
 
 Matching ignores case.
 
+## Metadata
+
+These are kept in step with the source. When only they differ, nothing is copied: the metadata alone is updated.
+
+- Read-only, hidden and system attributes, and creation times (Windows)
+- Permission bits (macOS and Linux)
+- Folder modification times, except for the mirrored folder itself
+
+A change made by hand in the destination is noticed at the next full check. On macOS and Linux, a destination folder always stays writable by its owner, so later runs can write into it.
+
 ## How files are compared
 
 Files are compared by size and modification time, not by content. On Windows, times must match exactly on NTFS and ReFS destinations, and may differ by up to 2 seconds elsewhere. On macOS and Linux they may always differ by up to 2 seconds.
@@ -136,7 +146,7 @@ Turn on **Copy links as links** under **Advanced** (`--copy-links` on the comman
 
 - A change that keeps both the size and the modification time is not detected.
 - A rename that only changes letter case is not applied to the destination on Windows and macOS.
-- Folder modification times and access control lists are not copied. Extended attributes are not copied on macOS and Linux.
+- Access control lists are not copied. Extended attributes are not copied on macOS and Linux.
 - The source is read on every run, unless the change journal is in use.
 
 ## Building

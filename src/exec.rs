@@ -22,6 +22,7 @@ pub struct Report {
     pub copied: u64,
     pub copied_bytes: u64,
     pub links: u64,
+    pub metadata: u64,
     pub deleted: u64,
     pub errors: u64,
     pub scan_errors: u64,
@@ -33,6 +34,7 @@ struct Shared<'a> {
     disk_full: AtomicBool,
     counter: AtomicU64,
     links_done: AtomicU64,
+    meta_done: AtomicU64,
 }
 
 impl Shared<'_> {
@@ -141,7 +143,43 @@ fn create_links(plan: &Plan, shared: &Shared) {
     }
 }
 
-fn copy_one(plan: &Plan, rel: &Path, shared: &Shared) -> io::Result<()> {
+/// A copy starts with a new creation date. A disk that cannot store the old one
+/// should not cost the file its backup; the next full check reports the difference.
+fn created_on_copy(tmp: &Path, created: i64) -> io::Result<()> {
+    if created != 0 {
+        let meta = platform::Meta {
+            created,
+            mtime: None,
+            attrs: None,
+        };
+        let _ = platform::set_metadata(tmp, &meta);
+    }
+    Ok(())
+}
+
+fn apply_metadata(plan: &Plan, shared: &Shared) {
+    for item in &plan.metadata {
+        if shared.ctx.cancelled() {
+            return;
+        }
+        match platform::set_metadata(&plan.dest.join(&item.rel), &item.meta) {
+            Ok(()) => {
+                shared.meta_done.fetch_add(1, Ordering::Relaxed);
+            }
+            Err(e) => shared.fail(&item.rel, tr("update metadata", "メタデータ更新"), &e),
+        }
+    }
+    for item in &plan.restore_dirs {
+        if shared.ctx.cancelled() {
+            return;
+        }
+        // A folder that failed to be created was already reported. Other failures
+        // appear at the next full check, as a difference to update.
+        let _ = platform::set_metadata(&plan.dest.join(&item.rel), &item.meta);
+    }
+}
+
+fn copy_one(plan: &Plan, rel: &Path, created: i64, shared: &Shared) -> io::Result<()> {
     let source = plan.source.join(rel);
     let target = plan.dest.join(rel);
     let id = shared.counter.fetch_add(1, Ordering::Relaxed);
@@ -150,7 +188,10 @@ fn copy_one(plan: &Plan, rel: &Path, shared: &Shared) -> io::Result<()> {
     let copied = platform::copy_file(&source, &tmp, &shared.ctx.cancel, &mut |n| {
         progress.bytes_done.fetch_add(n, Ordering::Relaxed);
     });
-    let result = copied.and_then(|()| retry_writable(&target, || fs::rename(&tmp, &target)));
+    let created = created_on_copy(&tmp, created);
+    let result = copied
+        .and(created)
+        .and_then(|()| retry_writable(&target, || fs::rename(&tmp, &target)));
     if result.is_err() {
         // The temporary file is ours and holds no unique data.
         let _ = fs::remove_file(&tmp);
@@ -170,7 +211,7 @@ fn copy_all(plan: &Plan, shared: &Shared) {
                 let Some(item) = plan.copies.get(index) else {
                     return;
                 };
-                match copy_one(plan, &item.rel, shared) {
+                match copy_one(plan, &item.rel, item.created, shared) {
                     Ok(()) => {
                         shared
                             .ctx
@@ -252,6 +293,7 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
         disk_full: AtomicBool::new(false),
         counter: AtomicU64::new(0),
         links_done: AtomicU64::new(0),
+        meta_done: AtomicU64::new(0),
     };
 
     // A file and folder that swapped places must be cleared before copying.
@@ -293,6 +335,7 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
         remove_files(&plan.dest, &plan.delete_files, &shared);
         remove_dirs(&plan.dest, &plan.delete_dirs, &shared);
     }
+    apply_metadata(&plan, &shared);
     progress.set_phase(Phase::Idle);
 
     if ctx.cancelled() {
@@ -305,6 +348,7 @@ pub fn execute(plan: Plan, ctx: &RunContext, allow_guarded: bool) -> Result<Repo
         copied: progress.files_done.load(Ordering::Relaxed),
         copied_bytes: progress.bytes_done.load(Ordering::Relaxed),
         links: shared.links_done.load(Ordering::Relaxed),
+        metadata: shared.meta_done.load(Ordering::Relaxed),
         deleted: progress.deletes_done.load(Ordering::Relaxed),
         errors,
         scan_errors: plan.scan_errors,

@@ -11,7 +11,7 @@ use crate::journal::{self, SourceIndex};
 use crate::model::*;
 use crate::platform;
 use crate::trf;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -22,6 +22,14 @@ pub struct CopyItem {
     pub rel: PathBuf,
     pub size: u64,
     pub is_new: bool,
+    pub created: i64,
+}
+
+/// Metadata to apply to something already in the destination.
+#[derive(Clone, Debug)]
+pub struct MetaItem {
+    pub rel: PathBuf,
+    pub meta: platform::Meta,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -73,6 +81,10 @@ pub struct Plan {
     pub copies: Vec<CopyItem>,
     pub mkdirs: Vec<PathBuf>,
     pub links: Vec<LinkItem>,
+    /// Only the metadata of these items differs.
+    pub metadata: Vec<MetaItem>,
+    /// Folders this plan writes into or creates, whose dates are put back afterwards.
+    pub restore_dirs: Vec<MetaItem>,
     /// Removed before copying because a file and a folder swapped places.
     pub conflict_files: Vec<PathBuf>,
     pub conflict_dirs: Vec<PathBuf>,
@@ -102,6 +114,7 @@ impl Plan {
         !(self.copies.is_empty()
             && self.mkdirs.is_empty()
             && self.links.is_empty()
+            && self.metadata.is_empty()
             && self.conflict_files.is_empty()
             && self.conflict_dirs.is_empty()
             && self.delete_files.is_empty()
@@ -152,6 +165,8 @@ struct Output {
     copies: Vec<CopyItem>,
     mkdirs: Vec<PathBuf>,
     links: Vec<LinkItem>,
+    metadata: Vec<MetaItem>,
+    dir_meta: HashMap<PathBuf, platform::Meta>,
     conflict_files: Vec<PathBuf>,
     conflict_dirs: Vec<PathBuf>,
     delete_files: Vec<PathBuf>,
@@ -194,6 +209,15 @@ fn rel_text(rel: &Path) -> String {
 
 fn is_marker(rel: &Path, name: &std::ffi::OsStr) -> bool {
     rel.as_os_str().is_empty() && name == MARKER_NAME
+}
+
+/// The metadata a destination folder should end up with.
+fn dir_meta(s: &Entry) -> platform::Meta {
+    platform::Meta {
+        created: s.created,
+        mtime: Some(s.mtime),
+        attrs: Some(platform::dir_attrs(s.attrs)),
+    }
 }
 
 fn is_tmp(name: &std::ffi::OsStr) -> bool {
@@ -511,6 +535,11 @@ impl Walker<'_> {
         }
     }
 
+    fn created_differs(&self, s: &Entry, d: &Entry) -> bool {
+        // Unix listings have no creation time to compare.
+        s.created != 0 && d.created != 0 && (s.created - d.created).abs() > self.tolerance
+    }
+
     fn count_source(&self, entry: &Entry, local: &mut Output) {
         match entry.kind {
             Kind::Dir => local.stats.source_dirs += 1,
@@ -561,6 +590,7 @@ impl Walker<'_> {
                 _ => local.conflict_files.push(path.clone()),
             }
             if s.kind == Kind::Dir {
+                local.dir_meta.insert(path.clone(), dir_meta(s));
                 local.mkdirs.push(path.clone());
                 children.push((path, Mode::SourceOnly));
             } else {
@@ -569,6 +599,7 @@ impl Walker<'_> {
                     rel: path,
                     size: s.size,
                     is_new: true,
+                    created: s.created,
                 });
             }
             state.push(s.clone());
@@ -631,10 +662,12 @@ impl Walker<'_> {
                     rel: path,
                     size: s.size,
                     is_new: true,
+                    created: s.created,
                 });
                 state.push(s.clone());
             }
             Kind::Dir => {
+                local.dir_meta.insert(path.clone(), dir_meta(s));
                 local.mkdirs.push(path.clone());
                 children.push((path, Mode::SourceOnly));
                 state.push(s.clone());
@@ -721,19 +754,47 @@ impl Walker<'_> {
         }
         match (s.kind, d.kind) {
             (Kind::Dir, Kind::Dir) => {
-                state.push(s.clone());
+                let mut s = s.clone();
+                if (s.mtime - d.mtime).abs() > self.tolerance || s.attrs != d.attrs {
+                    // The listing can lag, so a difference is checked at the folder.
+                    if let Some(actual) = platform::actual_dir_meta(&join(self.source, &path)) {
+                        (s.mtime, s.attrs) = actual;
+                    }
+                }
+                let differs = (s.mtime - d.mtime).abs() > self.tolerance
+                    || self.created_differs(&s, d)
+                    || platform::dir_attrs(s.attrs) != platform::dir_attrs(d.attrs);
+                if differs {
+                    local.metadata.push(MetaItem {
+                        rel: path.clone(),
+                        meta: dir_meta(&s),
+                    });
+                }
+                local.dir_meta.insert(path.clone(), dir_meta(&s));
+                state.push(s);
                 children.push((path, Mode::Both));
             }
             (Kind::File, Kind::File) => {
                 let same = s.size == d.size && (s.mtime - d.mtime).abs() <= self.tolerance;
                 if same {
                     local.stats.unchanged += 1;
+                    if s.attrs != d.attrs || self.created_differs(s, d) {
+                        local.metadata.push(MetaItem {
+                            rel: path,
+                            meta: platform::Meta {
+                                created: s.created,
+                                mtime: None,
+                                attrs: Some(s.attrs),
+                            },
+                        });
+                    }
                 } else {
                     local.stats.copy_bytes += s.size;
                     local.copies.push(CopyItem {
                         rel: path,
                         size: s.size,
                         is_new: false,
+                        created: s.created,
                     });
                 }
                 state.push(s.clone());
@@ -746,10 +807,12 @@ impl Walker<'_> {
                     rel: path,
                     size: s.size,
                     is_new: true,
+                    created: s.created,
                 });
                 state.push(s.clone());
             }
             _ => {
+                local.dir_meta.insert(path.clone(), dir_meta(s));
                 local.conflict_files.push(path.clone());
                 local.mkdirs.push(path.clone());
                 children.push((path, Mode::SourceOnly));
@@ -763,6 +826,8 @@ impl Walker<'_> {
         out.copies.extend(local.copies);
         out.mkdirs.extend(local.mkdirs);
         out.links.extend(local.links);
+        out.metadata.extend(local.metadata);
+        out.dir_meta.extend(local.dir_meta);
         out.conflict_files.extend(local.conflict_files);
         out.conflict_dirs.extend(local.conflict_dirs);
         out.delete_files.extend(local.delete_files);
@@ -1018,6 +1083,48 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
     out.delete_dirs.sort_unstable_by(deepest_first);
     out.conflict_dirs.sort_unstable_by(deepest_first);
 
+    out.metadata.sort_unstable_by(|a, b| a.rel.cmp(&b.rel));
+    // Writing into a folder changes its date, so every folder touched gets its
+    // date back afterwards, as does every folder created.
+    let shown: HashSet<&PathBuf> = out.metadata.iter().map(|m| &m.rel).collect();
+    let parent_of = |rel: &PathBuf| rel.parent().map(Path::to_path_buf);
+    let touched: HashSet<PathBuf> = out
+        .copies
+        .iter()
+        .map(|c| &c.rel)
+        .chain(out.links.iter().map(|l| &l.rel))
+        .chain(&out.delete_files)
+        .chain(&out.delete_dirs)
+        .chain(&out.conflict_files)
+        .chain(&out.conflict_dirs)
+        .chain(&out.mkdirs)
+        .filter_map(parent_of)
+        .chain(out.mkdirs.iter().cloned())
+        .collect();
+    let mut restore_dirs: Vec<MetaItem> = touched
+        .into_iter()
+        .filter(|rel| !shown.contains(rel))
+        .filter_map(|rel| {
+            let mut meta = *out.dir_meta.get(&rel)?;
+            // The listing can lag for a folder whose contents just changed.
+            if let Some((mtime, attrs)) = platform::actual_dir_meta(&source.join(&rel)) {
+                meta.mtime = Some(mtime);
+                meta.attrs = Some(platform::dir_attrs(attrs));
+                let entries = rel.parent().and_then(|parent| out.state.get_mut(parent));
+                let found = entries.and_then(|entries| {
+                    let name = rel.file_name()?;
+                    entries.iter_mut().find(|e| e.name == name)
+                });
+                if let Some(entry) = found {
+                    entry.mtime = mtime;
+                    entry.attrs = attrs;
+                }
+            }
+            Some(MetaItem { rel, meta })
+        })
+        .collect();
+    restore_dirs.sort_unstable_by(|a, b| a.rel.cmp(&b.rel));
+
     let delete_total = (out.delete_files.len() + out.conflict_files.len()) as u64;
     let delete_dirs_total = (out.delete_dirs.len() + out.conflict_dirs.len()) as u64;
     let updates = out.copies.iter().filter(|c| !c.is_new).count() as u64;
@@ -1057,6 +1164,8 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         copies: out.copies,
         mkdirs: out.mkdirs,
         links: out.links,
+        metadata: out.metadata,
+        restore_dirs,
         conflict_files: out.conflict_files,
         conflict_dirs: out.conflict_dirs,
         delete_files: out.delete_files,

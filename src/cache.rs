@@ -14,8 +14,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const MAGIC: &[u8; 8] = b"HKGMCCH1";
-const SOURCE_MAGIC: &[u8; 8] = b"HKGMSRC1";
+const MAGIC: &[u8; 8] = b"HKGMCCH2";
+const SOURCE_MAGIC: &[u8; 8] = b"HKGMSRC2";
 
 pub type DirMap = HashMap<PathBuf, Vec<Entry>>;
 
@@ -100,6 +100,8 @@ fn put_dirs(out: &mut Vec<u8>, dirs: &DirMap) {
             });
             out.extend(e.size.to_le_bytes());
             out.extend(e.mtime.to_le_bytes());
+            out.extend(e.created.to_le_bytes());
+            out.extend(u64::from(e.attrs).to_le_bytes());
         }
     }
 }
@@ -180,11 +182,15 @@ fn read_dirs(r: &mut Reader) -> Option<DirMap> {
             };
             let size = r.u64()?;
             let mtime = r.u64()? as i64;
+            let created = r.u64()? as i64;
+            let attrs = r.u64()? as u32;
             entries.push(Entry {
                 name,
                 kind,
                 size,
                 mtime,
+                created,
+                attrs,
             });
         }
         dirs.insert(rel, entries);
@@ -271,6 +277,8 @@ mod tests {
                 kind: Kind::File,
                 size: 12,
                 mtime: -5,
+                created: 3,
+                attrs: 1,
             }],
         );
         CacheFile {
@@ -289,6 +297,8 @@ mod tests {
         let e = &back.dirs[&PathBuf::from("a")][0];
         assert_eq!(e.name, "日本語.txt");
         assert_eq!(e.mtime, -5);
+        assert_eq!(e.created, 3);
+        assert_eq!(e.attrs, 1);
         assert_eq!(e.kind, Kind::File);
     }
 

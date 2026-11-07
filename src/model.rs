@@ -34,6 +34,10 @@ pub struct Entry {
     pub size: u64,
     /// Last modification, in 100 ns units since the Unix epoch.
     pub mtime: i64,
+    /// Creation time in the same units, or 0 where the listing has none.
+    pub created: i64,
+    /// Read-only, hidden and system on Windows; the permission bits on Unix.
+    pub attrs: u32,
 }
 
 /// One source-to-destination folder mirror.

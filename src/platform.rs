@@ -64,6 +64,14 @@ pub fn os_from_bytes(bytes: &[u8]) -> Option<OsString> {
     }
 }
 
+/// Metadata to apply without touching a file's contents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Meta {
+    pub created: i64,
+    pub mtime: Option<i64>,
+    pub attrs: Option<u32>,
+}
+
 /// What a link is, exactly as stored: the target is never resolved or rewritten.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkInfo {
@@ -98,14 +106,16 @@ mod windows_impl {
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::Foundation::{
         CloseHandle, GetLastError, ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_FILES,
-        ERROR_REQUEST_ABORTED, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+        ERROR_REQUEST_ABORTED, FILETIME, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CopyFileExW, CreateFileW, FindClose, FindExInfoBasic, FindExSearchNameMatch,
-        FindFirstFileExW, FindNextFileW, GetDiskFreeSpaceExW, GetDriveTypeW, GetVolumeInformationW,
-        GetVolumePathNameW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
-        FILE_SHARE_WRITE, FIND_FIRST_EX_LARGE_FETCH, OPEN_EXISTING, WIN32_FIND_DATAW,
+        FindFirstFileExW, FindNextFileW, GetDiskFreeSpaceExW, GetDriveTypeW, GetFileAttributesW,
+        GetVolumeInformationW, GetVolumePathNameW, SetFileAttributesW, SetFileTime,
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_WRITE_ATTRIBUTES, FIND_FIRST_EX_LARGE_FETCH, INVALID_FILE_ATTRIBUTES, OPEN_EXISTING,
+        WIN32_FIND_DATAW,
     };
     use windows_sys::Win32::System::Ioctl::{
         PropertyStandardQuery, StorageDeviceSeekPenaltyProperty, DEVICE_SEEK_PENALTY_DESCRIPTOR,
@@ -116,6 +126,9 @@ mod windows_impl {
     const DRIVE_REMOTE: u32 = 4;
     const EPOCH_DIFF_100NS: i64 = 116_444_736_000_000_000;
     const NAME_SURROGATE_BIT: u32 = 0x2000_0000;
+    /// Read-only, hidden and system. Others describe the disk's copy, such as
+    /// archive, which every write sets.
+    const COPIED_ATTRIBUTES: u32 = 0x7;
     const PROGRESS_CONTINUE: u32 = 0;
     const PROGRESS_CANCEL: u32 = 1;
 
@@ -216,6 +229,77 @@ mod windows_impl {
                 };
             }
         }
+    }
+
+    /// The modification time and attributes held by a folder itself. What a parent
+    /// folder's listing says about it can lag behind.
+    pub fn actual_dir_meta(path: &Path) -> Option<(i64, u32)> {
+        use std::os::windows::fs::MetadataExt;
+        let meta = fs::metadata(path).ok()?;
+        Some((
+            meta.last_write_time() as i64 - EPOCH_DIFF_100NS,
+            meta.file_attributes() & COPIED_ATTRIBUTES,
+        ))
+    }
+
+    /// A folder's attributes compare as they are.
+    pub fn dir_attrs(attrs: u32) -> u32 {
+        attrs
+    }
+
+    fn to_filetime(time: i64) -> FILETIME {
+        let value = time + EPOCH_DIFF_100NS;
+        FILETIME {
+            dwLowDateTime: value as u32,
+            dwHighDateTime: (value >> 32) as u32,
+        }
+    }
+
+    /// Applies metadata to an existing file or folder without touching contents.
+    pub fn set_metadata(path: &Path, meta: &Meta) -> io::Result<()> {
+        let name = wide(path.as_os_str());
+        let handle = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                FILE_WRITE_ATTRIBUTES,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                std::ptr::null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        let created = to_filetime(meta.created);
+        let modified = meta.mtime.map(to_filetime);
+        let modified_ptr = modified
+            .as_ref()
+            .map_or(std::ptr::null(), |time| time as *const FILETIME);
+        let ok = unsafe { SetFileTime(handle, &created, std::ptr::null(), modified_ptr) };
+        let timed = if ok == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        };
+        unsafe { CloseHandle(handle) };
+        timed?;
+        let Some(attrs) = meta.attrs else {
+            return Ok(());
+        };
+        let current = unsafe { GetFileAttributesW(name.as_ptr()) };
+        if current == INVALID_FILE_ATTRIBUTES {
+            return Err(io::Error::last_os_error());
+        }
+        let wanted = (current & !COPIED_ATTRIBUTES) | (attrs & COPIED_ATTRIBUTES);
+        if wanted == current {
+            return Ok(());
+        }
+        if unsafe { SetFileAttributesW(name.as_ptr(), wanted) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
     }
 
     /// Reads a link without following it. Other reparse points are unsupported.
@@ -381,11 +465,15 @@ mod windows_impl {
         };
         let filetime = ((data.ftLastWriteTime.dwHighDateTime as i64) << 32)
             | data.ftLastWriteTime.dwLowDateTime as i64;
+        let created = ((data.ftCreationTime.dwHighDateTime as i64) << 32)
+            | data.ftCreationTime.dwLowDateTime as i64;
         out.push(Entry {
             name: OsString::from_wide(name),
             kind,
             size: ((data.nFileSizeHigh as u64) << 32) | data.nFileSizeLow as u64,
             mtime: filetime - EPOCH_DIFF_100NS,
+            created: created - EPOCH_DIFF_100NS,
+            attrs: data.dwFileAttributes & COPIED_ATTRIBUTES,
         });
     }
 
@@ -626,6 +714,8 @@ mod unix_impl {
                 kind,
                 size: meta.len(),
                 mtime: meta.mtime() * 10_000_000 + meta.mtime_nsec() / 100,
+                created: 0,
+                attrs: meta.mode() & 0o7777,
             });
         }
         Ok(out)
@@ -675,6 +765,40 @@ mod unix_impl {
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
         let rc = unsafe { libc::statvfs(bytes.as_ptr().cast(), &mut stat) };
         (rc == 0).then(|| stat.f_bavail as u64 * stat.f_frsize as u64)
+    }
+
+    /// The modification time and permission bits held by a folder itself.
+    pub fn actual_dir_meta(path: &Path) -> Option<(i64, u32)> {
+        let meta = fs::metadata(path).ok()?;
+        Some((
+            meta.mtime() * 10_000_000 + meta.mtime_nsec() / 100,
+            meta.mode() & 0o7777,
+        ))
+    }
+
+    /// The owner always keeps full access to a destination folder, or a later
+    /// run could not write into it.
+    pub fn dir_attrs(attrs: u32) -> u32 {
+        attrs | 0o700
+    }
+
+    /// Applies metadata to an existing file or folder without touching contents.
+    pub fn set_metadata(path: &Path, meta: &Meta) -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, SystemTime};
+        if let Some(mtime) = meta.mtime {
+            let offset = Duration::from_nanos(mtime.unsigned_abs().saturating_mul(100));
+            let time = if mtime >= 0 {
+                SystemTime::UNIX_EPOCH + offset
+            } else {
+                SystemTime::UNIX_EPOCH - offset
+            };
+            fs::File::open(path)?.set_modified(time)?;
+        }
+        if let Some(attrs) = meta.attrs {
+            fs::set_permissions(path, fs::Permissions::from_mode(attrs))?;
+        }
+        Ok(())
     }
 
     /// Reads a link without following it. Devices and the like are unsupported.

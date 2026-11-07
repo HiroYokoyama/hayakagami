@@ -3,7 +3,9 @@
 use hayakagami::exec;
 use hayakagami::model::{PairSpec, RunContext, ScanOptions};
 use hayakagami::plan::{self, Plan};
-use hayakagami::platform::{self, LinkKind};
+use hayakagami::platform;
+#[cfg(windows)]
+use hayakagami::platform::LinkKind;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Once;

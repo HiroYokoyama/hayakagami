@@ -247,6 +247,16 @@ fn build_rows(plans: &[Plan]) -> Vec<(RowKind, String)> {
             };
             rows.push((kind, item.rel.display().to_string()));
         }
+        for item in &plan.metadata {
+            rows.push((
+                RowKind::Update,
+                trf!(
+                    "{} (metadata only)",
+                    "{}(メタデータのみ)",
+                    item.rel.display()
+                ),
+            ));
+        }
         for item in &plan.links {
             rows.push((
                 RowKind::New,

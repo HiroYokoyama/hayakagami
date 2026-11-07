@@ -115,10 +115,27 @@ fn print_plan(plan: &Plan, verbose: bool, took: f64) {
             plan.delete_count(),
         )
     );
+    if !plan.metadata.is_empty() {
+        println!(
+            "{}",
+            trf!(
+                "  Metadata only: {}",
+                "  メタデータのみ: {}",
+                plan.metadata.len()
+            )
+        );
+    }
     for warning in &plan.warnings {
         println!("  {} {warning}", tr("Warning:", "警告:"));
     }
     if verbose {
+        for item in &plan.metadata {
+            println!(
+                "    {} {}",
+                tr("metadata", "メタデータ"),
+                item.rel.display()
+            );
+        }
         for item in &plan.links {
             println!(
                 "    {} {} -> {}",
