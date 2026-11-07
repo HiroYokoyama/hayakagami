@@ -84,6 +84,29 @@ fn overwriting_less_than_a_tenth_goes_ahead() {
 }
 
 #[test]
+fn deleting_a_tenth_stops_and_changes_nothing() {
+    let f = Fixture::seeded(20);
+    fs::remove_file(f.source.join("f00.txt")).unwrap();
+    fs::remove_file(f.source.join("f01.txt")).unwrap();
+    let plan = f.scan();
+    assert!(plan.guard.is_some());
+    let result = exec::execute(plan, &RunContext::silent(), false);
+    assert!(matches!(result, Err(MirrorError::Guard(_))));
+    assert!(f.dest.join("f00.txt").exists());
+    assert!(f.dest.join("f01.txt").exists());
+}
+
+#[test]
+fn deleting_less_than_a_tenth_goes_ahead() {
+    let f = Fixture::seeded(20);
+    fs::remove_file(f.source.join("f00.txt")).unwrap();
+    let plan = f.scan();
+    assert!(plan.guard.is_none());
+    exec::execute(plan, &RunContext::silent(), false).unwrap();
+    assert!(!f.dest.join("f00.txt").exists());
+}
+
+#[test]
 fn an_approved_overwrite_is_carried_out() {
     let f = Fixture::seeded(20);
     f.damage(20);

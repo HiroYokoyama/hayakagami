@@ -86,7 +86,7 @@ Hayakagami stops without changing anything, and asks you to review the plan, whe
 - the source is empty but files would be deleted (a disconnected drive, for example)
 - files would be deleted from a destination it has never mirrored to (the wrong folder, for example)
 - existing files would be overwritten in a destination it has never mirrored to
-- half or more of the destination's files would be deleted (when it holds 10 files or more)
+- a tenth or more of the destination's files would be deleted (when it holds 10 files or more)
 - a tenth or more of the destination's files would be overwritten (when it holds 10 files or more), as ransomware in the source would cause
 
 It also behaves as follows:

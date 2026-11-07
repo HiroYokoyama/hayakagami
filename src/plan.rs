@@ -1199,7 +1199,7 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
             "保存先の {} 件のうち {updates} 件を上書きしようとしています。ランサムウェアなどで元のファイルが壊れていないか確認してください",
             out.stats.dest_files
         ))
-    } else if out.stats.dest_files >= 10 && delete_total * 2 >= out.stats.dest_files {
+    } else if out.stats.dest_files >= 10 && delete_total * 10 >= out.stats.dest_files {
         Some(trf!(
             "{delete_total} of the {} files in the destination would be deleted. Check that the source and destination are right.",
             "保存先の {} 件のうち {delete_total} 件を削除しようとしています。元と保存先が正しいか確認してください",
