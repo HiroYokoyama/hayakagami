@@ -2,6 +2,11 @@
 
 # Hayakagami
 
+[![Build](https://github.com/HiroYokoyama/hayakagami/actions/workflows/build.yml/badge.svg)](https://github.com/HiroYokoyama/hayakagami/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/HiroYokoyama/hayakagami)](https://github.com/HiroYokoyama/hayakagami/releases/latest)
+![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
+![Rust](https://img.shields.io/badge/built%20with-Rust-orange)
+
 English | [日本語](README_JA.md)
 
 A folder-based mirror backup tool for Windows, macOS and Linux.
