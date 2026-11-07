@@ -104,6 +104,7 @@ pub enum Phase {
     Scanning = 1,
     Copying = 2,
     Deleting = 3,
+    Metadata = 4,
 }
 
 /// Counters read by the UI while a job runs.
@@ -118,6 +119,8 @@ pub struct Progress {
     pub bytes_done: AtomicU64,
     pub deletes_total: AtomicU64,
     pub deletes_done: AtomicU64,
+    pub metadata_total: AtomicU64,
+    pub metadata_done: AtomicU64,
     pub errors: AtomicU64,
 }
 
@@ -131,6 +134,7 @@ impl Progress {
             1 => Phase::Scanning,
             2 => Phase::Copying,
             3 => Phase::Deleting,
+            4 => Phase::Metadata,
             _ => Phase::Idle,
         }
     }
@@ -146,6 +150,8 @@ impl Progress {
             &self.bytes_done,
             &self.deletes_total,
             &self.deletes_done,
+            &self.metadata_total,
+            &self.metadata_done,
             &self.errors,
         ] {
             c.store(0, Ordering::Relaxed);

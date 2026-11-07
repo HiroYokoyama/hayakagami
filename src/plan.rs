@@ -75,6 +75,7 @@ pub struct Plan {
     pub source: PathBuf,
     pub dest: PathBuf,
     pub copy_threads: usize,
+    pub metadata_threads: usize,
     pub scan_threads: (usize, usize),
     pub dest_scan: DestScan,
     pub source_scan: SourceScan,
@@ -988,6 +989,11 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         .scan_threads
         .unwrap_or(dest_disk.scan_threads())
         .max(1);
+    // Metadata lives on the destination alone, so the source's disk has no say.
+    let metadata_threads = options
+        .copy_threads
+        .unwrap_or(dest_disk.copy_threads())
+        .max(1);
     let copy_threads = options
         .copy_threads
         .unwrap_or(source_disk.copy_threads().min(dest_disk.copy_threads()))
@@ -1170,6 +1176,7 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         source,
         dest,
         copy_threads,
+        metadata_threads,
         scan_threads: (source_threads, dest_threads),
         dest_scan,
         source_scan,

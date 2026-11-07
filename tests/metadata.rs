@@ -1,10 +1,11 @@
 //! Metadata kept in step without copying contents, on temporary folders only.
 
 use hayakagami::exec;
-use hayakagami::model::{PairSpec, RunContext, ScanOptions};
+use hayakagami::model::{MirrorError, PairSpec, RunContext, ScanOptions};
 use hayakagami::plan::{self, Plan};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Once;
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
@@ -90,6 +91,91 @@ fn within_tolerance(a: SystemTime, b: SystemTime) -> bool {
         .or_else(|_| b.duration_since(a))
         .unwrap();
     gap <= Duration::from_secs(2)
+}
+
+/// Many files in several folders, with several threads however fast this disk is:
+/// every one must be done, and counted for the progress display.
+#[test]
+fn every_item_is_updated_and_counted() {
+    let f = Fixture::new();
+    for folder in 0..5 {
+        let dir = f.source.join(format!("many{folder}"));
+        fs::create_dir(&dir).unwrap();
+        for file in 0..40 {
+            fs::write(dir.join(format!("{file}.txt")), "contents").unwrap();
+        }
+    }
+    f.run();
+
+    let mut changed = Vec::new();
+    for folder in 0..5 {
+        let dir = f.source.join(format!("many{folder}"));
+        for file in 0..40 {
+            let path = dir.join(format!("{file}.txt"));
+            let mut permissions = fs::metadata(&path).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(&path, permissions).unwrap();
+            changed.push(format!("many{folder}/{file}.txt"));
+        }
+    }
+
+    let mut plan = f.scan(true);
+    plan.metadata_threads = 4;
+    assert!(plan.copies.is_empty(), "nothing needs copying");
+    let total = (plan.metadata.len() + plan.restore_dirs.len()) as u64;
+    assert!(plan.metadata.len() >= changed.len());
+    let ctx = RunContext::silent();
+    let report = exec::execute(plan, &ctx, true).unwrap();
+    let done = ctx.progress.metadata_done.load(Ordering::Relaxed);
+    assert_eq!(ctx.progress.metadata_total.load(Ordering::Relaxed), total);
+    assert_eq!(done, total);
+    assert!(report.metadata >= changed.len() as u64);
+    assert_eq!(report.errors, 0);
+    for rel in &changed {
+        assert!(fs::metadata(f.dest.join(rel))
+            .unwrap()
+            .permissions()
+            .readonly());
+    }
+    assert!(!f.scan(true).has_work());
+
+    // Leave the temporary folder removable.
+    for rel in &changed {
+        for root in [&f.source, &f.dest] {
+            let path = root.join(rel);
+            let mut permissions = fs::metadata(&path).unwrap().permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            fs::set_permissions(&path, permissions).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_cancelled_run_stops_updating() {
+    let f = Fixture::new();
+    f.run();
+    let path = f.source.join("sub").join("file.txt");
+    let mut permissions = fs::metadata(&path).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&path, permissions).unwrap();
+
+    let plan = f.scan(true);
+    assert!(!plan.metadata.is_empty());
+    let ctx = RunContext::silent();
+    ctx.cancel.store(true, Ordering::Relaxed);
+    assert!(matches!(
+        exec::execute(plan, &ctx, true),
+        Err(MirrorError::Cancelled)
+    ));
+    assert_eq!(ctx.progress.metadata_done.load(Ordering::Relaxed), 0);
+    let target = f.dest.join("sub").join("file.txt");
+    assert!(!fs::metadata(target).unwrap().permissions().readonly());
+
+    let mut permissions = fs::metadata(&path).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    fs::set_permissions(&path, permissions).unwrap();
 }
 
 #[test]

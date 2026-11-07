@@ -1284,6 +1284,18 @@ impl App {
                 );
                 ui.label(trf!("Deleting {done} / {all}", "削除中 {done} / {all}"));
             }
+            Phase::Metadata => {
+                let (done, all) = (
+                    p.metadata_done.load(Ordering::Relaxed),
+                    p.metadata_total.load(Ordering::Relaxed),
+                );
+                ui.add(
+                    egui::ProgressBar::new(done as f32 / all.max(1) as f32).text(trf!(
+                        "Updating metadata {done} / {all}",
+                        "メタデータ更新中 {done} / {all}"
+                    )),
+                );
+            }
         }
     }
 }

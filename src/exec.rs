@@ -7,7 +7,7 @@
 use crate::cache::{self, CacheFile};
 use crate::i18n::tr;
 use crate::model::*;
-use crate::plan::Plan;
+use crate::plan::{MetaItem, Plan};
 use crate::platform;
 use crate::trf;
 use std::collections::HashSet;
@@ -158,25 +158,57 @@ fn created_on_copy(tmp: &Path, created: i64) -> io::Result<()> {
 }
 
 fn apply_metadata(plan: &Plan, shared: &Shared) {
-    for item in &plan.metadata {
-        if shared.ctx.cancelled() {
-            return;
-        }
-        match platform::set_metadata(&plan.dest.join(&item.rel), &item.meta) {
-            Ok(()) => {
-                shared.meta_done.fetch_add(1, Ordering::Relaxed);
-            }
-            Err(e) => shared.fail(&item.rel, tr("update metadata", "メタデータ更新"), &e),
-        }
+    let progress = &shared.ctx.progress;
+    let total = plan.metadata.len() + plan.restore_dirs.len();
+    progress
+        .metadata_total
+        .store(total as u64, Ordering::Relaxed);
+    progress.metadata_done.store(0, Ordering::Relaxed);
+    if total == 0 {
+        return;
     }
-    for item in &plan.restore_dirs {
-        if shared.ctx.cancelled() {
-            return;
+    progress.set_phase(Phase::Metadata);
+    each_metadata_item(plan, &plan.metadata, shared, |item, result| match result {
+        Ok(()) => {
+            shared.meta_done.fetch_add(1, Ordering::Relaxed);
         }
-        // A folder that failed to be created was already reported. Other failures
-        // appear at the next full check, as a difference to update.
-        let _ = platform::set_metadata(&plan.dest.join(&item.rel), &item.meta);
-    }
+        Err(e) => shared.fail(&item.rel, tr("update metadata", "メタデータ更新"), &e),
+    });
+    // A folder that failed to be created was already reported. Other failures
+    // appear at the next full check, as a difference to update.
+    each_metadata_item(plan, &plan.restore_dirs, shared, |_, _| {});
+}
+
+/// Updates the items in path order. A hard disk gets one thread, because more
+/// would only move its heads further between neighbours.
+fn each_metadata_item(
+    plan: &Plan,
+    items: &[MetaItem],
+    shared: &Shared,
+    report: impl Fn(&MetaItem, io::Result<()>) + Sync,
+) {
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..plan.metadata_threads.max(1) {
+            scope.spawn(|| loop {
+                if shared.ctx.cancelled() {
+                    return;
+                }
+                let Some(item) = items.get(next.fetch_add(1, Ordering::Relaxed)) else {
+                    return;
+                };
+                report(
+                    item,
+                    platform::set_metadata(&plan.dest.join(&item.rel), &item.meta),
+                );
+                shared
+                    .ctx
+                    .progress
+                    .metadata_done
+                    .fetch_add(1, Ordering::Relaxed);
+            });
+        }
+    });
 }
 
 fn copy_one(plan: &Plan, rel: &Path, created: i64, shared: &Shared) -> io::Result<()> {
