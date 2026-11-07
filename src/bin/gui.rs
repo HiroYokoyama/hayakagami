@@ -1193,8 +1193,9 @@ impl App {
             .as_ref()
             .is_some_and(|plans| !plans.iter().any(Plan::has_work));
         let on_run_tab = self.tab == Tab::Run;
-        self.overall_bar(ui);
-        let bar = egui::vec2(ui.available_width(), 34.0);
+        // Two rows while running, so that both bars share the width left by the buttons.
+        let height = if busy { 58.0 } else { 34.0 };
+        let bar = egui::vec2(ui.available_width(), height);
         ui.allocate_ui_with_layout(
             bar,
             egui::Layout::right_to_left(egui::Align::Center),
@@ -1250,7 +1251,10 @@ impl App {
                     }
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    self.status_line(ui);
+                    ui.vertical(|ui| {
+                        self.overall_bar(ui);
+                        self.status_line(ui);
+                    });
                 });
             },
         );
@@ -1276,7 +1280,6 @@ impl App {
         } else {
             elapsed
         };
-        ui.add_space(6.0);
         let bar = match p.overall_fraction() {
             Some(fraction) => {
                 let percent = (fraction * 100.0) as u32;
@@ -1285,11 +1288,16 @@ impl App {
                     "全体 {percent}%({where_in_run})"
                 ))
             }
-            // How much there is to do is not known until the comparison ends.
-            None => egui::ProgressBar::new(0.0).animate(true).text(trf!(
-                "Comparing before starting ({where_in_run})",
-                "開始前の比較中({where_in_run})"
-            )),
+            // How much there is to do is not known until the comparison ends. No
+            // animation: its spinner would sit on the text, and one already turns
+            // beside the stop button. No fill: at zero the bar still paints a round
+            // blob, and that would sit on the text too.
+            None => egui::ProgressBar::new(0.0)
+                .fill(egui::Color32::TRANSPARENT)
+                .text(trf!(
+                    "Comparing before starting ({where_in_run})",
+                    "開始前の比較中({where_in_run})"
+                )),
         };
         ui.add(bar);
     }
