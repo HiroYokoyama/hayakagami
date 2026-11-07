@@ -1144,6 +1144,12 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
             "{updates} existing files would be overwritten in a destination that Hayakagami has never mirrored to. Check that this is the right folder.",
             "このソフトでミラーしたことがない保存先のファイルを {updates} 件上書きしようとしています。保存先が正しいか確認してください"
         ))
+    } else if out.stats.dest_files >= 10 && updates * 10 >= out.stats.dest_files {
+        Some(trf!(
+            "{updates} of the {} files in the destination would be overwritten. Check that the source files are not damaged, by ransomware for example.",
+            "保存先の {} 件のうち {updates} 件を上書きしようとしています。ランサムウェアなどで元のファイルが壊れていないか確認してください",
+            out.stats.dest_files
+        ))
     } else if out.stats.dest_files >= 10 && delete_total * 2 >= out.stats.dest_files {
         Some(trf!(
             "{delete_total} of the {} files in the destination would be deleted. Check that the source and destination are right.",

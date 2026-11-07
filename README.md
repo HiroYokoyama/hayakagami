@@ -55,6 +55,7 @@ Hayakagami stops without changing anything, and asks you to review the plan, whe
 - files would be deleted from a destination it has never mirrored to (the wrong folder, for example)
 - existing files would be overwritten in a destination it has never mirrored to
 - half or more of the destination's files would be deleted (when it holds 10 files or more)
+- a tenth or more of the destination's files would be overwritten (when it holds 10 files or more), as ransomware in the source would cause
 
 It also behaves as follows:
 
@@ -62,7 +63,7 @@ It also behaves as follows:
 - A folder that cannot be read is left alone: nothing in it is copied or deleted.
 - Symbolic links and junctions are never followed. By default they are not copied either (see [Links](#links)).
 - Excluded files are not deleted from the destination.
-- Files are copied to a temporary name and then swapped in, so an interruption does not damage the existing copy.
+- Files are copied to a temporary name, forced onto the disk and then swapped in, so an interruption or power cut does not damage the existing copy. This makes copying many small files slower.
 
 ## Usage
 

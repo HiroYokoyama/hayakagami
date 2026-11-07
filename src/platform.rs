@@ -508,6 +508,31 @@ mod windows_impl {
     }
 
     /// Copies contents, attributes, alternate streams and the modification time.
+    /// Forces a finished copy onto the disk. Its size and date look right from the
+    /// moment it is renamed, so a later run could not tell if the data were lost.
+    fn flush_copy(path: &Path) -> io::Result<()> {
+        let mut perms = fs::metadata(path)?.permissions();
+        let readonly = perms.readonly();
+        if readonly {
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            fs::set_permissions(path, perms.clone())?;
+        }
+        let flushed = fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .and_then(|file| file.sync_all());
+        if readonly {
+            perms.set_readonly(true);
+            fs::set_permissions(path, perms)?;
+        }
+        match flushed {
+            // Some network file systems have no flush to offer.
+            Err(e) if matches!(e.raw_os_error(), Some(1 | 50)) => Ok(()),
+            other => other,
+        }
+    }
+
     pub fn copy_file(
         src: &Path,
         dst: &Path,
@@ -532,7 +557,7 @@ mod windows_impl {
             )
         };
         if ok != 0 {
-            return Ok(());
+            return flush_copy(dst);
         }
         let code = unsafe { GetLastError() };
         if code == ERROR_REQUEST_ABORTED {
@@ -745,7 +770,9 @@ mod unix_impl {
         }
         output.set_permissions(meta.permissions())?;
         output.set_modified(meta.modified()?)?;
-        Ok(())
+        // Its size and date look right from the moment it is renamed, so a later
+        // run could not tell if the data were lost.
+        output.sync_all()
     }
 
     pub fn volume_info(path: &Path) -> Option<(String, String)> {
