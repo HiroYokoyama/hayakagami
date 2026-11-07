@@ -101,6 +101,16 @@ def main():
             (label, repeat(baseline, accepted), cold(baseline, accepted)),
         ]
 
+        if platform.system() == "Windows":
+            # The first run saves the source listings; later ones use the journal.
+            journal = mirror + ["--usn"]
+            timed(journal)
+            _, journal_output = timed(journal)
+            print(journal_output)
+            if "Source: change journal" not in journal_output:
+                raise SystemExit("the change journal was not used on the repeated run")
+            rows.insert(0, ("Hayakagami: cache and --usn", repeat(journal), None))
+
         changed = source / "g10" / "d00010" / "file010.dat"
         changed.write_bytes(b"changed content, longer than before" * 20)
         one_change, output = timed(mirror)
