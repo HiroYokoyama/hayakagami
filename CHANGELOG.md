@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+### Changed
+
+- A run now stops for review when a tenth or more of the destination's files would be deleted (when it holds 10 files or more). It used to stop at half.
+
 ## 0.4.0
 
 ### Added
