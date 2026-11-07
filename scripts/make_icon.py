@@ -28,9 +28,9 @@ def folder_mask(tab):
     mask = Image.new("L", (SIZE, SIZE), 0)
     draw = ImageDraw.Draw(mask)
     if tab:
-        draw.rounded_rectangle((px(112), px(300), px(300), px(450)), radius=px(34), fill=255)
+        draw.rounded_rectangle((px(130), px(364), px(300), px(440)), radius=px(28), fill=255)
     else:
-        draw.rounded_rectangle((px(112), px(360), px(472), px(724)), radius=px(44), fill=255)
+        draw.rounded_rectangle((px(130), px(396), px(470), px(656)), radius=px(36), fill=255)
     return mask
 
 
@@ -58,10 +58,10 @@ def main():
     for x, width in ((640, 64), (736, 26)):
         glint_draw.polygon(
             [
-                (px(x + 110), px(340)),
-                (px(x + 110 + width), px(340)),
-                (px(x - 60 + width), px(740)),
-                (px(x - 60), px(740)),
+                (px(x + 80), px(380)),
+                (px(x + 80 + width), px(380)),
+                (px(x - 30 + width), px(670)),
+                (px(x - 30), px(670)),
             ],
             fill=255,
         )
@@ -70,7 +70,7 @@ def main():
 
     # The mirror line.
     ImageDraw.Draw(canvas).rounded_rectangle(
-        (px(494), px(208), px(530), px(816)), radius=px(18), fill=(255, 255, 255, 255)
+        (px(494), px(272), px(530), px(752)), radius=px(18), fill=(255, 255, 255, 255)
     )
 
     canvas.putalpha(ImageChops.multiply(canvas.getchannel("A"), tile))
