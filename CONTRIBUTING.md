@@ -19,7 +19,7 @@ cargo build
 
 ## Checks
 
-Pull requests must pass these on Windows, macOS and Linux. Continuous integration runs them on all three.
+Pull requests must pass these on Windows, macOS and Linux. Continuous integration runs them on all three. Release archives are built only for a tag, or when the `Build` workflow is started from the Actions tab.
 
 ```bash
 cargo fmt --check
