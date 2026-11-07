@@ -19,6 +19,12 @@
 
 ![パターン設定タブ](docs/screenshot-settings.png)
 
+## インストール
+
+[Releases](https://github.com/HiroYokoyama/hayakagami/releases/latest) からお使いのOSの圧縮ファイルをダウンロードし、好きな場所に展開してください。インストーラーはありません。`hayakagami-gui`(デスクトップアプリ)と `hayakagami`(コマンドライン)が入っています。
+
+プログラムには署名がないため、初めて開くときにWindowsやmacOSが警告を出すことがあります。
+
 ## 速さの仕組み
 
 - **保存先を読まない:** 前回の保存先の状態を手元に記録し、次回は元フォルダだけを読んで比較します。
@@ -176,3 +182,12 @@ Linuxでは `libgtk-3-dev`、`libxkbcommon-dev`、`libgl1-mesa-dev` が必要で
 
 - `scripts/bench.py`: 速度を測定します。GitHub Actionsの `Benchmark` ワークフローから実行します。
 - `scripts/make_icon.py`: `assets/` のアイコンを生成します(Pillowが必要)。
+- `scripts/third_party_notices.py`: 配布ファイルに入れる、依存クレートのライセンスを集めます。
+
+## ライセンス
+
+Copyright (C) 2026 HiroYokoyama
+
+GNU Lesser General Public License バージョン3以降で公開しています。詳しくは [LICENSE](LICENSE) と [COPYING](COPYING) をご覧ください。これらのライセンスのとおり、無保証です。
+
+配布ファイルの `THIRD-PARTY-NOTICES.txt` に、プログラムに組み込まれたクレートのライセンスを記載しています。

@@ -19,6 +19,12 @@ It is built for the common case where almost nothing changed, yet a backup still
 
 ![The Pattern settings tab](docs/screenshot-settings.png)
 
+## Install
+
+Download the archive for your system from [Releases](https://github.com/HiroYokoyama/hayakagami/releases/latest) and unpack it anywhere. There is no installer. It holds `hayakagami-gui` (the desktop app) and `hayakagami` (the command line).
+
+The programs are not signed, so Windows and macOS may warn when you first open them.
+
 ## Why it is fast
 
 - **It skips the destination.** The state of the destination is remembered after each run, so the next run only reads the source.
@@ -178,3 +184,12 @@ Linux needs `libgtk-3-dev`, `libxkbcommon-dev` and `libgl1-mesa-dev`.
 
 - `scripts/bench.py` measures speed. Run it through the `Benchmark` GitHub Actions workflow.
 - `scripts/make_icon.py` generates the icons in `assets/` (requires Pillow).
+- `scripts/third_party_notices.py` collects the licenses of the crates for release archives.
+
+## License
+
+Copyright (C) 2026 HiroYokoyama
+
+Hayakagami is free software under the GNU Lesser General Public License, version 3 or (at your option) any later version. See [LICENSE](LICENSE) and [COPYING](COPYING). It comes with no warranty, as those licenses state.
+
+Release archives list the licenses of the crates built into the programs in `THIRD-PARTY-NOTICES.txt`.

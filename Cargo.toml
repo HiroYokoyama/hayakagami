@@ -1,9 +1,13 @@
 [package]
 name = "hayakagami"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.85"
 description = "Folder-based mirror backup that avoids rescanning the destination"
+authors = ["HiroYokoyama"]
+license = "LGPL-3.0-or-later"
+repository = "https://github.com/HiroYokoyama/hayakagami"
+readme = "README.md"
 default-run = "hayakagami"
 
 [lib]
