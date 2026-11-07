@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0
+
+The first official release. Hayakagami is now called Hikae (控え, a spare copy). Everything carries over by itself, so nothing needs to be set up again.
+
+### Changed
+
+- The programs are now `hikae` and `hikae-gui`. Replace the old ones, and update any scripts that call them.
+- Patterns are copied to the new settings folder on the first start. The old folder is left in place, and can be deleted once you are happy with the update.
+- Saved state moves to the new folder, so the first run does not need a full check.
+- `.hayakagami-state` in a destination is replaced by `.hikae-state` on the next run.
+- Pattern files are saved as `.hikae`. Existing `.hkgm` files still open, on the command line too.
+- On Windows, an existing `.hkgm` link is moved to the new program on the first start, and covers `.hikae` as well.
+- The environment variables are now `HIKAE_HOME` and `HIKAE_REQUIRE_USN`.
+
 ## 0.4.1
 
 ### Changed

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measures comparison time when almost nothing changed. Meant for CI runners.
 
-Usage: bench.py <path to hayakagami binary> [folders] [files per folder]
+Usage: bench.py <path to hikae binary> [folders] [files per folder]
 Everything happens under a new temporary folder, which is removed at the end.
 """
 
@@ -76,9 +76,9 @@ def main():
     binary = str(Path(sys.argv[1]).resolve())
     folders = int(sys.argv[2]) if len(sys.argv) > 2 else 2000
     per_folder = int(sys.argv[3]) if len(sys.argv) > 3 else 50
-    work = Path(tempfile.mkdtemp(prefix="hkgm-bench-"))
+    work = Path(tempfile.mkdtemp(prefix="hikae-bench-"))
     try:
-        os.environ["HAYAKAGAMI_HOME"] = str(work / "home")
+        os.environ["HIKAE_HOME"] = str(work / "home")
         source = work / "source"
         dest = work / "dest"
         started = time.perf_counter()
@@ -96,8 +96,8 @@ def main():
 
         label, baseline, accepted = baseline_command(source, dest)
         rows = [
-            ("Hayakagami: cache", repeat(mirror), cold(mirror)),
-            ("Hayakagami: --full", repeat(mirror + ["--full"]), cold(mirror + ["--full"])),
+            ("Hikae: cache", repeat(mirror), cold(mirror)),
+            ("Hikae: --full", repeat(mirror + ["--full"]), cold(mirror + ["--full"])),
             (label, repeat(baseline, accepted), cold(baseline, accepted)),
         ]
 
@@ -109,7 +109,7 @@ def main():
             print(journal_output)
             if "Source: change journal" not in journal_output:
                 raise SystemExit("the change journal was not used on the repeated run")
-            rows.insert(0, ("Hayakagami: cache and --usn", repeat(journal), None))
+            rows.insert(0, ("Hikae: cache and --usn", repeat(journal), None))
 
         changed = source / "g10" / "d00010" / "file010.dat"
         changed.write_bytes(b"changed content, longer than before" * 20)

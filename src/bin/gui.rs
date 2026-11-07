@@ -2,15 +2,15 @@
 //! Desktop interface.
 
 use eframe::egui::{self, Color32, CornerRadius, Frame, RichText, Stroke};
-use hayakagami::config::{self, Config, FolderPair, Pattern};
-use hayakagami::elevate;
-use hayakagami::exec;
-use hayakagami::i18n::{self, tr, Lang};
-use hayakagami::journal::{self, RemoteHandle};
-use hayakagami::model::{display_path, MirrorError, PairSpec, Phase, RunContext, ScanOptions};
-use hayakagami::plan::{self, DestScan, Plan, SourceScan};
-use hayakagami::platform;
-use hayakagami::trf;
+use hikae::config::{self, Config, FolderPair, Pattern};
+use hikae::elevate;
+use hikae::exec;
+use hikae::i18n::{self, tr, Lang};
+use hikae::journal::{self, RemoteHandle};
+use hikae::model::{display_path, MirrorError, PairSpec, Phase, RunContext, ScanOptions};
+use hikae::plan::{self, DestScan, Plan, SourceScan};
+use hikae::platform;
+use hikae::trf;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -377,6 +377,11 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>, file: Option<PathBuf>) -> Self {
         load_fonts(&cc.egui_ctx);
         apply_style(&cc.egui_ctx);
+        let mut migration = config::migrate_legacy();
+        if std::env::var_os("HIKAE_HOME").is_none() {
+            let linked = std::env::current_exe().and_then(|exe| platform::migrate_file_type(&exe));
+            migration.extend(linked.err().map(|e| e.to_string()));
+        }
         let config_path = config::config_path();
         let (mut config, mut load_error) = match config::load(&config_path) {
             Ok(config) => (config, None),
@@ -419,6 +424,7 @@ impl App {
             journal_remote: None,
             journal_declined: false,
         };
+        app.log.extend(migration);
         app.sync_excludes_text();
         // A pattern file asks at once, so the prompt comes when it is opened
         // and not partway through its preview or run.
@@ -632,12 +638,7 @@ impl App {
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
-        ui.label(
-            RichText::new("Hayakagami")
-                .size(18.0)
-                .strong()
-                .color(ACCENT),
-        );
+        ui.label(RichText::new("Hikae").size(18.0).strong().color(ACCENT));
         ui.add_space(10.0);
         let busy = self.job.is_some();
         if let Some(path) = &self.file_mode {
@@ -731,10 +732,7 @@ impl App {
                 self.file_type_buttons(ui);
             }
             ui.separator();
-            if ui
-                .button(tr("About Hayakagami", "Hayakagami について"))
-                .clicked()
-            {
+            if ui.button(tr("About Hikae", "Hikae について")).clicked() {
                 self.about_open = true;
                 ui.close();
             }
@@ -758,7 +756,7 @@ impl App {
             ui.set_width(360.0);
             ui.horizontal(|ui| {
                 ui.add(egui::Image::new(&*icon).fit_to_exact_size(egui::vec2(48.0, 48.0)));
-                ui.heading(concat!("Hayakagami ", env!("CARGO_PKG_VERSION")));
+                ui.heading(concat!("Hikae ", env!("CARGO_PKG_VERSION")));
             });
             ui.add_space(4.0);
             ui.label(tr(
@@ -783,29 +781,29 @@ impl App {
     fn file_type_buttons(&mut self, ui: &mut egui::Ui) {
         let mut message = None;
         if ui
-            .button(tr("Link .hkgm files", ".hkgm を関連付け"))
+            .button(tr("Link .hikae files", ".hikae を関連付け"))
             .on_hover_text(tr(
-                "Double-clicking a .hkgm file then opens it here. Applies to your Windows user only.",
-                ".hkgm をダブルクリックすると、ここで開きます。今のWindowsユーザーだけに適用します",
+                "Double-clicking a .hikae file then opens it here. Applies to your Windows user only.",
+                ".hikae をダブルクリックすると、ここで開きます。今のWindowsユーザーだけに適用します",
             ))
             .clicked()
         {
             let result = std::env::current_exe().and_then(|exe| platform::register_file_type(&exe));
             message = Some(match result {
                 Ok(()) => tr(
-                    ".hkgm files now open with this app.",
-                    ".hkgm をこのアプリで開くように設定しました",
+                    ".hikae files now open with this app.",
+                    ".hikae をこのアプリで開くように設定しました",
                 )
                 .to_owned(),
                 Err(e) => e.to_string(),
             });
         }
         if ui
-            .button(tr("Unlink .hkgm files", ".hkgm の関連付け解除"))
+            .button(tr("Unlink .hikae files", ".hikae の関連付け解除"))
             .clicked()
         {
             message = Some(match platform::unregister_file_type() {
-                Ok(()) => tr(".hkgm link removed.", ".hkgm の関連付けを解除しました").to_owned(),
+                Ok(()) => tr(".hikae link removed.", ".hikae の関連付けを解除しました").to_owned(),
                 Err(e) => e.to_string(),
             });
         }
@@ -817,8 +815,8 @@ impl App {
     fn import_pattern(&mut self) {
         let picked = rfd::FileDialog::new()
             .add_filter(
-                tr("Hayakagami pattern", "Hayakagami パターン"),
-                &[config::PATTERN_EXTENSION],
+                tr("Hikae pattern", "Hikae パターン"),
+                &[config::PATTERN_EXTENSION, config::LEGACY_PATTERN_EXTENSION],
             )
             .pick_file();
         let Some(path) = picked else {
@@ -843,7 +841,7 @@ impl App {
         let picked = rfd::FileDialog::new()
             .set_file_name(format!("{}.{}", pattern.name, config::PATTERN_EXTENSION))
             .add_filter(
-                tr("Hayakagami pattern", "Hayakagami パターン"),
+                tr("Hikae pattern", "Hikae パターン"),
                 &[config::PATTERN_EXTENSION],
             )
             .save_file();
@@ -1683,14 +1681,14 @@ fn main() -> eframe::Result {
     let file = file.map(PathBuf::from);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title(concat!("Hayakagami ", env!("CARGO_PKG_VERSION")))
+            .with_title(concat!("Hikae ", env!("CARGO_PKG_VERSION")))
             .with_inner_size([980.0, 720.0])
             .with_min_inner_size([720.0, 520.0])
             .with_icon(Arc::new(app_icon())),
         ..Default::default()
     };
     eframe::run_native(
-        "Hayakagami",
+        "Hikae",
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc, file)))),
     )

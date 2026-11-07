@@ -1,14 +1,14 @@
 //! The change journal shortcut, on temporary folders only.
 //!
 //! Reading a real journal needs administrator rights on most drives. Tests that
-//! need it are skipped without them, except where HAYAKAGAMI_REQUIRE_USN is set,
+//! need it are skipped without them, except where HIKAE_REQUIRE_USN is set,
 //! as it is on the Windows CI runner.
 #![cfg(windows)]
 
-use hayakagami::exec;
-use hayakagami::journal::{Cursor, Keys, ReadFailure, RemoteHandle, RemoteJournal};
-use hayakagami::model::{PairSpec, RunContext, ScanOptions};
-use hayakagami::plan::{self, Plan, SourceScan};
+use hikae::exec;
+use hikae::journal::{Cursor, Keys, ReadFailure, RemoteHandle, RemoteJournal};
+use hikae::model::{PairSpec, RunContext, ScanOptions};
+use hikae::plan::{self, Plan, SourceScan};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,8 +26,8 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         ISOLATE.call_once(|| {
-            let home = std::env::temp_dir().join(format!("hkgm-usn-{}", std::process::id()));
-            std::env::set_var("HAYAKAGAMI_HOME", home);
+            let home = std::env::temp_dir().join(format!("hikae-usn-{}", std::process::id()));
+            std::env::set_var("HIKAE_HOME", home);
         });
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
@@ -83,7 +83,7 @@ fn tree(root: &Path) -> Vec<(String, Vec<u8>)> {
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             let rel = path.strip_prefix(root).unwrap().display().to_string();
-            if rel == ".hayakagami-state" {
+            if rel == ".hikae-state" {
                 continue;
             }
             if path.is_dir() {
@@ -106,7 +106,7 @@ fn readable(plan: &Plan) -> bool {
         return true;
     }
     assert!(
-        std::env::var_os("HAYAKAGAMI_REQUIRE_USN").is_none(),
+        std::env::var_os("HIKAE_REQUIRE_USN").is_none(),
         "the journal was not used: {:?}",
         plan.source_scan
     );
@@ -137,7 +137,7 @@ fn check_change(change: impl FnOnce(&Fixture)) {
 fn unchanged_runs_add_little_and_lose_nothing() {
     let f = Fixture::new();
     f.seed();
-    let index = hayakagami::journal::index_path(f.scan(None).state_file());
+    let index = hikae::journal::index_path(f.scan(None).state_file());
     let first = f.scan(None);
     if !readable(&first) {
         return;
@@ -164,7 +164,7 @@ fn unchanged_runs_add_little_and_lose_nothing() {
 fn a_torn_position_reads_the_journal_again() {
     let f = Fixture::new();
     f.seed();
-    let index = hayakagami::journal::index_path(f.scan(None).state_file());
+    let index = hikae::journal::index_path(f.scan(None).state_file());
     if !readable(&f.scan(None)) {
         return;
     }

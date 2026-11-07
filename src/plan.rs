@@ -223,7 +223,7 @@ fn rel_text(rel: &Path) -> String {
 }
 
 fn is_marker(rel: &Path, name: &std::ffi::OsStr) -> bool {
-    rel.as_os_str().is_empty() && name == MARKER_NAME
+    rel.as_os_str().is_empty() && (name == MARKER_NAME || name == LEGACY_MARKER_NAME)
 }
 
 /// The metadata a destination folder should end up with.
@@ -236,7 +236,8 @@ fn dir_meta(s: &Entry) -> platform::Meta {
 }
 
 fn is_tmp(name: &std::ffi::OsStr) -> bool {
-    name.to_string_lossy().ends_with(TMP_SUFFIX)
+    let name = name.to_string_lossy();
+    name.ends_with(TMP_SUFFIX) || name.ends_with(LEGACY_TMP_SUFFIX)
 }
 
 impl Walker<'_> {
@@ -1040,7 +1041,7 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
     let cache_file = cache::cache_path(&crate::config::cache_dir(), &source, &dest);
     let cache_enabled = options.full_check_days != 0;
     let dest_existed = dest.is_dir();
-    let had_marker = dest_existed && cache::marker_path(&dest).exists();
+    let had_marker = dest_existed && cache::has_marker(&dest);
 
     let (cached, dest_scan, last_full) = match usable_cache(&dest, options, &volume_id, &cache_file)
     {
@@ -1185,12 +1186,12 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
         ))
     } else if dest_existed && !had_marker && (delete_total > 0 || delete_dirs_total > 0) {
         Some(trf!(
-            "{delete_total} files would be deleted from a destination that Hayakagami has never mirrored to. Check that this is the right folder.",
+            "{delete_total} files would be deleted from a destination that Hikae has never mirrored to. Check that this is the right folder.",
             "このソフトでミラーしたことがない保存先のファイルを {delete_total} 件削除しようとしています。保存先が正しいか確認してください"
         ))
     } else if dest_existed && !had_marker && updates > 0 {
         Some(trf!(
-            "{updates} existing files would be overwritten in a destination that Hayakagami has never mirrored to. Check that this is the right folder.",
+            "{updates} existing files would be overwritten in a destination that Hikae has never mirrored to. Check that this is the right folder.",
             "このソフトでミラーしたことがない保存先のファイルを {updates} 件上書きしようとしています。保存先が正しいか確認してください"
         ))
     } else if out.stats.dest_files >= 10 && updates * 10 >= out.stats.dest_files {

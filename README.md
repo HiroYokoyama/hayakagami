@@ -1,15 +1,15 @@
-<p align="center"><img src="assets/icon-256.png" width="128" alt="Hayakagami icon"></p>
+<p align="center"><img src="assets/icon-256.png" width="128" alt="Hikae icon"></p>
 
-# Hayakagami
+# Hikae
 
-[![Build](https://github.com/HiroYokoyama/hayakagami/actions/workflows/build.yml/badge.svg)](https://github.com/HiroYokoyama/hayakagami/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/HiroYokoyama/hayakagami)](https://github.com/HiroYokoyama/hayakagami/releases/latest)
+[![Build](https://github.com/HiroYokoyama/hikae/actions/workflows/build.yml/badge.svg)](https://github.com/HiroYokoyama/hikae/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/HiroYokoyama/hikae)](https://github.com/HiroYokoyama/hikae/releases/latest)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 ![Rust](https://img.shields.io/badge/built%20with-Rust-orange)
 
 English | [日本語](README_JA.md)
 
-A folder-based mirror backup tool for Windows, macOS and Linux.
+A folder-based mirror backup tool for Windows, macOS and Linux. Formerly Hayakagami; settings and pattern files carry over by themselves.
 
 It is built for the common case where almost nothing changed, yet a backup still spends its time scanning.
 
@@ -21,7 +21,7 @@ It is built for the common case where almost nothing changed, yet a backup still
 
 ## Install
 
-Download the archive for your system from [Releases](https://github.com/HiroYokoyama/hayakagami/releases/latest) and unpack it anywhere. There is no installer. It holds `hayakagami-gui` (the desktop app) and `hayakagami` (the command line).
+Download the archive for your system from [Releases](https://github.com/HiroYokoyama/hikae/releases/latest) and unpack it anywhere. There is no installer. It holds `hikae-gui` (the desktop app) and `hikae` (the command line).
 
 The programs are not signed, so Windows and macOS may warn when you first open them.
 
@@ -37,9 +37,9 @@ Time to compare 100,000 files in 2,000 folders when nothing changed, in seconds.
 
 | | Windows | macOS | Linux |
 |---|---:|---:|---:|
-| Hayakagami, saved state | 0.178 | 0.213 | 0.182 |
-| Hayakagami, saved state and `--usn` | 0.198 | - | - |
-| Hayakagami, `--full` | 0.261 | 1.083 | 0.219 |
+| Hikae, saved state | 0.178 | 0.213 | 0.182 |
+| Hikae, saved state and `--usn` | 0.198 | - | - |
+| Hikae, `--full` | 0.261 | 1.083 | 0.219 |
 | robocopy `/MIR /L` | 0.416 | - | - |
 | rsync `-a --delete --dry-run` | - | 6.231 | 0.781 |
 
@@ -59,11 +59,11 @@ On Windows, turn on **Use the NTFS change journal** under **Advanced** (`--usn` 
 
 ## When the saved state is not trusted
 
-Hayakagami reads the whole destination (a full check) when:
+Hikae reads the whole destination (a full check) when:
 
 - the destination disk changed
 - the last run did not finish
-- `.hayakagami-state` in the destination is missing or does not match
+- `.hikae-state` in the destination is missing or does not match
 - the periodic full check is due (every 30 days by default)
 - you ask for a full check
 
@@ -75,13 +75,13 @@ The saved state is kept small on purpose, so that frequent runs do not wear out 
 
 - A run with nothing to do writes nothing. With the change journal, it adds about 100 bytes for its new position.
 - A run that changed something adds only the folders that changed. About every time the additions reach half of the file (and at least 256 KB), the file is rewritten as one, so it stays at most about one and a half times its full size.
-- Only a rewrite is forced onto the disk. If a power cut takes the end of the file, Hayakagami goes back to the last good point: it reads the journal again from there, or lists the destination.
+- Only a rewrite is forced onto the disk. If a power cut takes the end of the file, Hikae goes back to the last good point: it reads the journal again from there, or lists the destination.
 
 Copied files are always forced onto the destination disk, which is a separate matter: it protects your backup, and it applies only to files actually copied.
 
 ## How your data is protected
 
-Hayakagami stops without changing anything, and asks you to review the plan, when:
+Hikae stops without changing anything, and asks you to review the plan, when:
 
 - the source is empty but files would be deleted (a disconnected drive, for example)
 - files would be deleted from a destination it has never mirrored to (the wrong folder, for example)
@@ -101,7 +101,7 @@ It also behaves as follows:
 
 ### Desktop app
 
-Start `hayakagami-gui` and create a pattern. A pattern is a named set of folder pairs and exclusions. Choose the language under **Preferences**.
+Start `hikae-gui` and create a pattern. A pattern is a named set of folder pairs and exclusions. Choose the language under **Preferences**.
 
 1. Press **New pattern**, then choose the source and destination folders under **Pattern settings**.
 2. On the **Run** tab, press **Preview** to review the plan.
@@ -115,22 +115,22 @@ Windows and Linux tell disks apart by ID (the volume serial number and the file 
 
 ### Pattern files
 
-**Save as file** stores a pattern as a `.hkgm` file. On the command line, use `hayakagami run <file>.hkgm`.
+**Save as file** stores a pattern as a `.hikae` file. On the command line, use `hikae run <file>.hikae`.
 
-On Windows, press **Link .hkgm files** under **Preferences** to open these files with a double-click. Opening a file runs a preview. Turn on **Run right away when this pattern's file is opened** under **Advanced** to run it instead. Safety checks still apply.
+On Windows, press **Link .hikae files** under **Preferences** to open these files with a double-click. Opening a file runs a preview. Turn on **Run right away when this pattern's file is opened** under **Advanced** to run it instead. Safety checks still apply.
 
 Double-click opening is not available on macOS yet.
 
-> Check a `.hkgm` file from someone else before opening it. It is plain text.
+> Check a `.hikae` file from someone else before opening it. It is plain text.
 
 ### Command line
 
 ```bash
-hayakagami run <pattern name>
+hikae run <pattern name>
 ```
 
 ```bash
-hayakagami mirror <source> <destination> --exclude "*.tmp" --dry-run
+hikae mirror <source> <destination> --exclude "*.tmp" --dry-run
 ```
 
 | Option | Meaning |
@@ -210,6 +210,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Report anything that could lose data as 
 
 Copyright (C) 2026 HiroYokoyama
 
-Hayakagami is free software under the GNU Lesser General Public License, version 3 or (at your option) any later version. See [LICENSE](LICENSE) and [COPYING](COPYING). It comes with no warranty, as those licenses state.
+Hikae is free software under the GNU Lesser General Public License, version 3 or (at your option) any later version. See [LICENSE](LICENSE) and [COPYING](COPYING). It comes with no warranty, as those licenses state.
 
 Release archives list the licenses of the crates built into the programs in `THIRD-PARTY-NOTICES.txt`.

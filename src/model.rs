@@ -7,9 +7,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 /// Reserved file in the destination root that ties it to a cache generation.
-pub const MARKER_NAME: &str = ".hayakagami-state";
+pub const MARKER_NAME: &str = ".hikae-state";
+/// The same file under the earlier name of this program. Still read, and replaced
+/// by the next run.
+pub const LEGACY_MARKER_NAME: &str = ".hayakagami-state";
 /// Suffix of in-flight copies. Leftovers are removed by the next full scan.
-pub const TMP_SUFFIX: &str = ".hkgmtmp";
+pub const TMP_SUFFIX: &str = ".hikaetmp";
+/// In-flight copies left by the earlier name of this program.
+pub const LEGACY_TMP_SUFFIX: &str = ".hkgmtmp";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {

@@ -1,8 +1,8 @@
 //! The overwrite safety check and flushed copies, on temporary folders only.
 
-use hayakagami::exec;
-use hayakagami::model::{DiskIdentity, MirrorError, PairSpec, RunContext, ScanOptions};
-use hayakagami::plan::{self, Plan};
+use hikae::exec;
+use hikae::model::{DiskIdentity, MirrorError, PairSpec, RunContext, ScanOptions};
+use hikae::plan::{self, Plan};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Once;
@@ -20,8 +20,8 @@ impl Fixture {
     /// A source of `files` files, already mirrored once.
     fn seeded(files: usize) -> Self {
         ISOLATE.call_once(|| {
-            let home = std::env::temp_dir().join(format!("hkgm-safety-{}", std::process::id()));
-            std::env::set_var("HAYAKAGAMI_HOME", home);
+            let home = std::env::temp_dir().join(format!("hikae-safety-{}", std::process::id()));
+            std::env::set_var("HIKAE_HOME", home);
         });
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");

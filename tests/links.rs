@@ -1,11 +1,11 @@
 //! Copying links as links, on temporary folders only.
 
-use hayakagami::exec;
-use hayakagami::model::{PairSpec, RunContext, ScanOptions};
-use hayakagami::plan::{self, Plan};
-use hayakagami::platform;
+use hikae::exec;
+use hikae::model::{PairSpec, RunContext, ScanOptions};
+use hikae::plan::{self, Plan};
+use hikae::platform;
 #[cfg(windows)]
-use hayakagami::platform::LinkKind;
+use hikae::platform::LinkKind;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -24,8 +24,8 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         ISOLATE.call_once(|| {
-            let home = std::env::temp_dir().join(format!("hkgm-links-{}", std::process::id()));
-            std::env::set_var("HAYAKAGAMI_HOME", home);
+            let home = std::env::temp_dir().join(format!("hikae-links-{}", std::process::id()));
+            std::env::set_var("HIKAE_HOME", home);
         });
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
@@ -93,7 +93,7 @@ fn file_link(target: &Path, link: &Path) -> bool {
         Ok(()) => true,
         Err(e) if platform::link_unavailable(&e) => {
             assert!(
-                std::env::var_os("HAYAKAGAMI_REQUIRE_USN").is_none(),
+                std::env::var_os("HIKAE_REQUIRE_USN").is_none(),
                 "symbolic links are required on CI: {e}"
             );
             eprintln!("skipped: {e}");

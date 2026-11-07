@@ -1,8 +1,8 @@
 //! Metadata kept in step without copying contents, on temporary folders only.
 
-use hayakagami::exec;
-use hayakagami::model::{MirrorError, PairSpec, RunContext, ScanOptions};
-use hayakagami::plan::{self, Plan};
+use hikae::exec;
+use hikae::model::{MirrorError, PairSpec, RunContext, ScanOptions};
+use hikae::plan::{self, Plan};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -21,8 +21,8 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         ISOLATE.call_once(|| {
-            let home = std::env::temp_dir().join(format!("hkgm-meta-{}", std::process::id()));
-            std::env::set_var("HAYAKAGAMI_HOME", home);
+            let home = std::env::temp_dir().join(format!("hikae-meta-{}", std::process::id()));
+            std::env::set_var("HIKAE_HOME", home);
         });
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");

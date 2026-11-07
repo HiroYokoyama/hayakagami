@@ -1,8 +1,8 @@
 //! End-to-end behaviour on temporary folders only.
 
-use hayakagami::exec;
-use hayakagami::model::{MirrorError, PairSpec, RunContext, ScanOptions};
-use hayakagami::plan::{self, DestScan, Plan};
+use hikae::exec;
+use hikae::model::{MirrorError, PairSpec, RunContext, ScanOptions};
+use hikae::plan::{self, DestScan, Plan};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -21,8 +21,8 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         ISOLATE.call_once(|| {
-            let home = std::env::temp_dir().join(format!("hkgm-test-{}", std::process::id()));
-            std::env::set_var("HAYAKAGAMI_HOME", home);
+            let home = std::env::temp_dir().join(format!("hikae-test-{}", std::process::id()));
+            std::env::set_var("HIKAE_HOME", home);
         });
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
@@ -289,7 +289,7 @@ fn removed_marker_forces_full_scan() {
     let f = Fixture::new();
     write(&f.source.join("a.txt"), "one");
     f.run();
-    fs::remove_file(f.dest.join(".hayakagami-state")).unwrap();
+    fs::remove_file(f.dest.join(".hikae-state")).unwrap();
     fs::remove_file(f.dest.join("a.txt")).unwrap();
     let plan = f.scan();
     assert!(matches!(plan.dest_scan, DestScan::Full(_)));
@@ -301,7 +301,7 @@ fn interrupted_run_forces_full_scan() {
     let f = Fixture::new();
     write(&f.source.join("a.txt"), "one");
     f.run();
-    fs::write(f.dest.join(".hayakagami-state"), "running-crashed").unwrap();
+    fs::write(f.dest.join(".hikae-state"), "running-crashed").unwrap();
     assert!(matches!(f.scan().dest_scan, DestScan::Full(_)));
 }
 
@@ -310,11 +310,11 @@ fn leftover_temp_file_is_removed_by_full_scan() {
     let f = Fixture::new();
     write(&f.source.join("a.txt"), "one");
     f.run();
-    write(&f.dest.join(".hkgm1-0.hkgmtmp"), "partial");
+    write(&f.dest.join(".hikae1-0.hikaetmp"), "partial");
     let plan = f.scan_full();
     assert_eq!(plan.delete_files.len(), 1);
     exec::execute(plan, &RunContext::silent(), true).unwrap();
-    assert!(!f.dest.join(".hkgm1-0.hkgmtmp").exists());
+    assert!(!f.dest.join(".hikae1-0.hikaetmp").exists());
     assert!(f.dest.join("a.txt").exists());
 }
 

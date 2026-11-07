@@ -16,7 +16,7 @@
 //! position. That is why appending needs no flush.
 
 use crate::journal::{Cursor, SourceIndex};
-use crate::model::{Entry, Kind, MARKER_NAME};
+use crate::model::{Entry, Kind, LEGACY_MARKER_NAME, MARKER_NAME};
 use crate::platform;
 use std::collections::HashMap;
 use std::fs;
@@ -66,14 +66,23 @@ pub fn marker_path(dest: &Path) -> PathBuf {
     dest.join(MARKER_NAME)
 }
 
+pub fn has_marker(dest: &Path) -> bool {
+    marker_path(dest).exists() || dest.join(LEGACY_MARKER_NAME).exists()
+}
+
+/// A marker under the current name wins, since writing one is what retires the old.
 pub fn read_marker(dest: &Path) -> Option<String> {
     fs::read_to_string(marker_path(dest))
+        .or_else(|_| fs::read_to_string(dest.join(LEGACY_MARKER_NAME)))
         .ok()
         .map(|s| s.trim().to_string())
 }
 
 pub fn write_marker(dest: &Path, value: &str) -> io::Result<()> {
-    fs::write(marker_path(dest), value)
+    fs::write(marker_path(dest), value)?;
+    // Only tidiness: left behind, the old file is ignored and never mirrored.
+    let _ = fs::remove_file(dest.join(LEGACY_MARKER_NAME));
+    Ok(())
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {

@@ -130,8 +130,10 @@ mod windows_impl {
     const PROGRESS_CONTINUE: u32 = 0;
     const PROGRESS_CANCEL: u32 = 1;
 
-    const CLASS_KEY: &str = r"HKCU\Software\Classes\Hayakagami.Pattern";
-    const EXTENSION_KEY: &str = r"HKCU\Software\Classes\.hkgm";
+    const CLASS_KEY: &str = r"HKCU\Software\Classes\Hikae.Pattern";
+    const EXTENSION_KEY: &str = r"HKCU\Software\Classes\.hikae";
+    const LEGACY_CLASS_KEY: &str = r"HKCU\Software\Classes\Hayakagami.Pattern";
+    const LEGACY_EXTENSION_KEY: &str = r"HKCU\Software\Classes\.hkgm";
 
     fn run_reg(args: &[&str]) -> io::Result<()> {
         use std::os::windows::process::CommandExt;
@@ -161,7 +163,8 @@ mod windows_impl {
         };
     }
 
-    /// Opens .hkgm files with `exe`, for this user only. No administrator rights are needed.
+    /// Opens .hikae and earlier .hkgm files with `exe`, for this user only. No
+    /// administrator rights are needed.
     pub fn register_file_type(exe: &Path) -> io::Result<()> {
         let exe = exe.display().to_string();
         let command = format!("\"{exe}\" \"%1\"");
@@ -169,14 +172,24 @@ mod windows_impl {
         let command_key = format!(r"{CLASS_KEY}\shell\open\command");
         let icon_key = format!(r"{CLASS_KEY}\DefaultIcon");
         for (key, value) in [
-            (EXTENSION_KEY, "Hayakagami.Pattern"),
-            (CLASS_KEY, "Hayakagami pattern"),
+            (EXTENSION_KEY, "Hikae.Pattern"),
+            (LEGACY_EXTENSION_KEY, "Hikae.Pattern"),
+            (CLASS_KEY, "Hikae pattern"),
             (icon_key.as_str(), icon.as_str()),
             (command_key.as_str(), command.as_str()),
         ] {
             run_reg(&["add", key, "/ve", "/d", value, "/f"])?;
         }
+        let _ = run_reg(&["delete", LEGACY_CLASS_KEY, "/f"]);
         notify_shell();
+        Ok(())
+    }
+
+    /// Moves the link made under the earlier name of this program over to `exe`.
+    pub fn migrate_file_type(exe: &Path) -> io::Result<()> {
+        if run_reg(&["query", LEGACY_CLASS_KEY]).is_ok() {
+            register_file_type(exe)?;
+        }
         Ok(())
     }
 
@@ -184,6 +197,8 @@ mod windows_impl {
     pub fn unregister_file_type() -> io::Result<()> {
         let first = run_reg(&["delete", EXTENSION_KEY, "/f"]);
         let second = run_reg(&["delete", CLASS_KEY, "/f"]);
+        let _ = run_reg(&["delete", LEGACY_EXTENSION_KEY, "/f"]);
+        let _ = run_reg(&["delete", LEGACY_CLASS_KEY, "/f"]);
         notify_shell();
         first.and(second)
     }
@@ -905,6 +920,10 @@ mod unix_impl {
     }
 
     /// File type registration is only implemented for Windows.
+    pub fn migrate_file_type(_exe: &Path) -> io::Result<()> {
+        Ok(())
+    }
+
     pub fn register_file_type(_exe: &Path) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }

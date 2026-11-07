@@ -49,7 +49,7 @@ mod windows_impl {
         ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
     };
 
-    const PIPE_PREFIX: &str = r"\\.\pipe\hayakagami-journal-";
+    const PIPE_PREFIX: &str = r"\\.\pipe\hikae-journal-";
     /// Time for the helper to connect after the permission prompt has closed.
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
     const SW_HIDE: i32 = 0;

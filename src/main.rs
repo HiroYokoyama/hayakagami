@@ -1,19 +1,19 @@
 //! Command line interface.
 
 use clap::{Parser, Subcommand};
-use hayakagami::config::{self, FolderPair};
-use hayakagami::exec::{self, Report};
-use hayakagami::i18n::{self, tr, Lang};
-use hayakagami::model::{MirrorError, PairSpec, RunContext, ScanOptions};
-use hayakagami::plan::{self, DestScan, Plan, SourceScan};
-use hayakagami::trf;
+use hikae::config::{self, FolderPair};
+use hikae::exec::{self, Report};
+use hikae::i18n::{self, tr, Lang};
+use hikae::model::{MirrorError, PairSpec, RunContext, ScanOptions};
+use hikae::plan::{self, DestScan, Plan, SourceScan};
+use hikae::trf;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Parser)]
-#[command(name = "hayakagami", version, about = "Folder-based mirror backup")]
+#[command(name = "hikae", version, about = "Folder-based mirror backup")]
 struct Cli {
     /// Message language: en or ja. Defaults to the saved setting, then English
     #[arg(long, global = true)]
@@ -53,7 +53,7 @@ struct RunFlags {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run a saved pattern, or a pattern file (.hkgm)
+    /// Run a saved pattern, or a pattern file (.hikae)
     Run {
         pattern: String,
         #[command(flatten)]
@@ -256,6 +256,9 @@ fn run_all(
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    for problem in config::migrate_legacy() {
+        eprintln!("{problem}");
+    }
     let saved = config::load(&config::config_path());
     let code = cli
         .lang
@@ -283,10 +286,7 @@ fn main() -> ExitCode {
         ),
         Command::Run { pattern, flags } => {
             let as_file = Path::new(&pattern);
-            let is_file = as_file
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case(config::PATTERN_EXTENSION));
-            if is_file {
+            if config::is_pattern_file(as_file) {
                 return match config::load_pattern_file(as_file) {
                     Ok(found) => run_all(
                         specs_from(&found.pairs, &found.excludes),

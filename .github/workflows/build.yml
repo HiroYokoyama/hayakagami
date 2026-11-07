@@ -36,11 +36,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: hayakagami-windows-x64
+            artifact: hikae-windows-x64
           - os: macos-latest
-            artifact: hayakagami-macos-arm64
+            artifact: hikae-macos-arm64
           - os: ubuntu-latest
-            artifact: hayakagami-linux-x64
+            artifact: hikae-linux-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -66,7 +66,7 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Test
         env:
-          HAYAKAGAMI_REQUIRE_USN: "1"
+          HIKAE_REQUIRE_USN: "1"
         run: cargo test --locked
       - name: Build
         if: env.PACKAGE == 'true'
@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "dist/${{ matrix.artifact }}"
-          for bin in hayakagami hayakagami-gui; do
+          for bin in hikae hikae-gui; do
             for file in "target/release/$bin" "target/release/$bin.exe"; do
               if [ -f "$file" ]; then cp "$file" "dist/${{ matrix.artifact }}/"; fi
             done

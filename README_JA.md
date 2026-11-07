@@ -1,15 +1,15 @@
-<p align="center"><img src="assets/icon-256.png" width="128" alt="Hayakagami のアイコン"></p>
+<p align="center"><img src="assets/icon-256.png" width="128" alt="Hikae のアイコン"></p>
 
-# Hayakagami(早鏡)
+# Hikae(控え)
 
-[![Build](https://github.com/HiroYokoyama/hayakagami/actions/workflows/build.yml/badge.svg)](https://github.com/HiroYokoyama/hayakagami/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/HiroYokoyama/hayakagami)](https://github.com/HiroYokoyama/hayakagami/releases/latest)
+[![Build](https://github.com/HiroYokoyama/hikae/actions/workflows/build.yml/badge.svg)](https://github.com/HiroYokoyama/hikae/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/HiroYokoyama/hikae)](https://github.com/HiroYokoyama/hikae/releases/latest)
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 ![Rust](https://img.shields.io/badge/built%20with-Rust-orange)
 
 [English](README.md) | 日本語
 
-フォルダ単位のミラーバックアップソフトです。Windows、macOS、Linuxで動きます。
+フォルダ単位のミラーバックアップソフトです。Windows、macOS、Linuxで動きます。旧名はHayakagamiです。設定とパターンファイルは自動で引き継ぎます。
 
 変更がほとんどないのにスキャンで待たされる、という場面を速くすることを目標にしています。
 
@@ -21,7 +21,7 @@
 
 ## インストール
 
-[Releases](https://github.com/HiroYokoyama/hayakagami/releases/latest) からお使いのOSの圧縮ファイルをダウンロードし、好きな場所に展開してください。インストーラーはありません。`hayakagami-gui`(デスクトップアプリ)と `hayakagami`(コマンドライン)が入っています。
+[Releases](https://github.com/HiroYokoyama/hikae/releases/latest) からお使いのOSの圧縮ファイルをダウンロードし、好きな場所に展開してください。インストーラーはありません。`hikae-gui`(デスクトップアプリ)と `hikae`(コマンドライン)が入っています。
 
 プログラムには署名がないため、初めて開くときにWindowsやmacOSが警告を出すことがあります。
 
@@ -37,9 +37,9 @@
 
 | | Windows | macOS | Linux |
 |---|---:|---:|---:|
-| Hayakagami(記録を使用) | 0.178 | 0.213 | 0.182 |
-| Hayakagami(記録と `--usn` を使用) | 0.198 | - | - |
-| Hayakagami(`--full`) | 0.261 | 1.083 | 0.219 |
+| Hikae(記録を使用) | 0.178 | 0.213 | 0.182 |
+| Hikae(記録と `--usn` を使用) | 0.198 | - | - |
+| Hikae(`--full`) | 0.261 | 1.083 | 0.219 |
 | robocopy `/MIR /L` | 0.416 | - | - |
 | rsync `-a --delete --dry-run` | - | 6.231 | 0.781 |
 
@@ -63,7 +63,7 @@ Windowsでは、「詳細設定」の「NTFSの変更ジャーナルで、変更
 
 - 保存先のディスクが前回と異なる
 - 前回の実行が途中で終わった
-- 保存先の `.hayakagami-state` がない、または内容が一致しない
+- 保存先の `.hikae-state` がない、または内容が一致しない
 - 定期フルチェックの時期になった(標準は30日)
 - フルチェックを指定した
 
@@ -84,8 +84,8 @@ Windowsでは、「詳細設定」の「NTFSの変更ジャーナルで、変更
 次の場合は何も変更せずに止まり、内容の確認を求めます。
 
 - 元フォルダが空なのに、保存先に削除対象がある(ドライブの接続ミスなど)
-- Hayakagamiでミラーしたことがない保存先に、削除対象がある(保存先の選び間違いなど)
-- Hayakagamiでミラーしたことがない保存先で、既存のファイルを上書きしようとしている
+- Hikaeでミラーしたことがない保存先に、削除対象がある(保存先の選び間違いなど)
+- Hikaeでミラーしたことがない保存先で、既存のファイルを上書きしようとしている
 - 保存先のファイルの10分の1以上を削除しようとしている(保存先に10ファイル以上ある場合)
 - 保存先のファイルの10分の1以上を上書きしようとしている(保存先に10ファイル以上ある場合。元がランサムウェアに暗号化された場合など)
 
@@ -101,7 +101,7 @@ Windowsでは、「詳細設定」の「NTFSの変更ジャーナルで、変更
 
 ### GUI
 
-`hayakagami-gui` を起動して、パターンを作成します。パターンには、名前付きで複数のフォルダの組と除外設定を保存できます。表示言語は「環境設定」で切り替えられます。
+`hikae-gui` を起動して、パターンを作成します。パターンには、名前付きで複数のフォルダの組と除外設定を保存できます。表示言語は「環境設定」で切り替えられます。
 
 1. 「新規パターン」を押し、「パターン設定」で元と保存先のフォルダを指定します。
 2. 「実行」タブの「プレビュー」で内容を確認します。
@@ -115,22 +115,22 @@ WindowsとLinuxはID(ボリュームのシリアル番号、ファイルシス�
 
 ### パターンファイル
 
-「ファイルに保存」で、パターンを `.hkgm` ファイルにできます。CLIでは `hayakagami run <ファイル>.hkgm` で実行できます。
+「ファイルに保存」で、パターンを `.hikae` ファイルにできます。CLIでは `hikae run <ファイル>.hikae` で実行できます。
 
-Windowsでは、「環境設定」の「.hkgm を関連付け」を押すと、ダブルクリックで開けるようになります。開くとプレビューまで行います。詳細設定の「パターンファイルを開いたらすぐ実行する」をオンにすると、そのまま実行します。その場合も安全装置は働きます。
+Windowsでは、「環境設定」の「.hikae を関連付け」を押すと、ダブルクリックで開けるようになります。開くとプレビューまで行います。詳細設定の「パターンファイルを開いたらすぐ実行する」をオンにすると、そのまま実行します。その場合も安全装置は働きます。
 
 macOSではまだダブルクリックに対応していません。
 
-> 人から受け取った `.hkgm` は、開く前に内容を確認してください。中身はテキストです。
+> 人から受け取った `.hikae` は、開く前に内容を確認してください。中身はテキストです。
 
 ### CLI
 
 ```bash
-hayakagami run <パターン名>
+hikae run <パターン名>
 ```
 
 ```bash
-hayakagami mirror <元フォルダ> <保存先フォルダ> --exclude "*.tmp" --dry-run
+hikae mirror <元フォルダ> <保存先フォルダ> --exclude "*.tmp" --dry-run
 ```
 
 | オプション | 内容 |

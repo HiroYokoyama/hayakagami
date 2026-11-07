@@ -3,9 +3,9 @@
 //! Each destination must keep its own state: a run to one of them must not make
 //! another miss a change.
 
-use hayakagami::exec;
-use hayakagami::model::{PairSpec, RunContext, ScanOptions};
-use hayakagami::plan::{self, DestScan, Plan, SourceScan};
+use hikae::exec;
+use hikae::model::{PairSpec, RunContext, ScanOptions};
+use hikae::plan::{self, DestScan, Plan, SourceScan};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -23,8 +23,8 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         ISOLATE.call_once(|| {
-            let home = std::env::temp_dir().join(format!("hkgm-multi-{}", std::process::id()));
-            std::env::set_var("HAYAKAGAMI_HOME", home);
+            let home = std::env::temp_dir().join(format!("hikae-multi-{}", std::process::id()));
+            std::env::set_var("HIKAE_HOME", home);
         });
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
@@ -102,7 +102,7 @@ fn a_deletion_reaches_every_destination() {
 fn trouble_in_one_destination_does_not_affect_the_other() {
     let f = Fixture::new();
     f.seed(false);
-    fs::remove_file(f.a.join(".hayakagami-state")).unwrap();
+    fs::remove_file(f.a.join(".hikae-state")).unwrap();
     assert!(matches!(f.scan(&f.a, false).dest_scan, DestScan::Full(_)));
     assert_eq!(f.scan(&f.b, false).dest_scan, DestScan::Cached);
 }
@@ -117,7 +117,7 @@ fn each_destination_keeps_its_own_journal_position() {
     let probe = f.scan(&f.a, true);
     if !matches!(probe.source_scan, SourceScan::Journal { .. }) {
         assert!(
-            std::env::var_os("HAYAKAGAMI_REQUIRE_USN").is_none() || !cfg!(windows),
+            std::env::var_os("HIKAE_REQUIRE_USN").is_none() || !cfg!(windows),
             "the journal was not used: {:?}",
             probe.source_scan
         );

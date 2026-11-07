@@ -1,25 +1,25 @@
 [package]
-name = "hayakagami"
-version = "0.4.1"
+name = "hikae"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.95"
 description = "Folder-based mirror backup that avoids rescanning the destination"
 authors = ["HiroYokoyama"]
 license = "LGPL-3.0-or-later"
-repository = "https://github.com/HiroYokoyama/hayakagami"
+repository = "https://github.com/HiroYokoyama/hikae"
 readme = "README.md"
-default-run = "hayakagami"
+default-run = "hikae"
 
 [lib]
-name = "hayakagami"
+name = "hikae"
 path = "src/lib.rs"
 
 [[bin]]
-name = "hayakagami"
+name = "hikae"
 path = "src/main.rs"
 
 [[bin]]
-name = "hayakagami-gui"
+name = "hikae-gui"
 path = "src/bin/gui.rs"
 
 [dependencies]

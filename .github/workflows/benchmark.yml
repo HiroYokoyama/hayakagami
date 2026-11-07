@@ -31,11 +31,11 @@ jobs:
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - name: Build
-        run: cargo build --release --locked --bin hayakagami
+        run: cargo build --release --locked --bin hikae
       - name: Measure
         shell: bash
         env:
           FOLDERS: ${{ inputs.folders || '2000' }}
           PER_FOLDER: ${{ inputs.per_folder || '50' }}
           PYTHONUTF8: "1"
-        run: python scripts/bench.py target/release/hayakagami "$FOLDERS" "$PER_FOLDER"
+        run: python scripts/bench.py target/release/hikae "$FOLDERS" "$PER_FOLDER"

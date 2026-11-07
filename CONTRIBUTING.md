@@ -1,12 +1,12 @@
-# Contributing to Hayakagami
+# Contributing to Hikae
 
-Thank you for helping. Hayakagami deletes and overwrites files on people's disks, so changes are held to one rule above the others: **when in doubt, do the slower, safer thing.**
+Thank you for helping. Hikae deletes and overwrites files on people's disks, so changes are held to one rule above the others: **when in doubt, do the slower, safer thing.**
 
 Issues and pull requests can be written in English or Japanese.
 
 ## Reporting
 
-- **Bugs and ideas:** open an [issue](https://github.com/HiroYokoyama/hayakagami/issues/new/choose).
+- **Bugs and ideas:** open an [issue](https://github.com/HiroYokoyama/hikae/issues/new/choose).
 - **A bug that can lose or damage data, or a security problem:** see [SECURITY.md](SECURITY.md). Do not put it in a public issue if others could be harmed before it is fixed.
 
 ## Setting up
@@ -37,7 +37,7 @@ Code behind `#[cfg(windows)]` or `#[cfg(unix)]` is not compiled on the other sys
 
 ### Tests that need administrator rights
 
-Reading the NTFS change journal usually needs administrator rights, so those tests skip themselves without them. Setting `HAYAKAGAMI_REQUIRE_USN=1`, as continuous integration does, makes a skip a failure. The same variable requires symbolic links to work on Windows.
+Reading the NTFS change journal usually needs administrator rights, so those tests skip themselves without them. Setting `HIKAE_REQUIRE_USN=1`, as continuous integration does, makes a skip a failure. The same variable requires symbolic links to work on Windows.
 
 Run them on your own machine with care, as an administrator, or rely on continuous integration.
 
@@ -45,7 +45,7 @@ Run them on your own machine with care, as an administrator, or rely on continuo
 
 ### Protecting data
 
-- Tests work only inside temporary folders. A test must never touch a real path, a drive letter or a user's settings. Set `HAYAKAGAMI_HOME` so that settings and saved state stay in a temporary folder too.
+- Tests work only inside temporary folders. A test must never touch a real path, a drive letter or a user's settings. Set `HIKAE_HOME` so that settings and saved state stay in a temporary folder too.
 - `plan::scan` never changes anything on disk. All changes belong in `exec::execute`.
 - The source is only ever read.
 - Never remove folders recursively. A folder is removed only once it is empty, so that a mistake cannot take a whole tree with it.

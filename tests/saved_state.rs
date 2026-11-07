@@ -1,8 +1,8 @@
 //! The saved destination state as an appended log, on temporary folders only.
 
-use hayakagami::exec;
-use hayakagami::model::{PairSpec, RunContext, ScanOptions};
-use hayakagami::plan::{self, DestScan, Plan};
+use hikae::exec;
+use hikae::model::{PairSpec, RunContext, ScanOptions};
+use hikae::plan::{self, DestScan, Plan};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -20,8 +20,8 @@ impl Fixture {
     /// A mirrored source of `folders` folders holding 10 files each.
     fn seeded(folders: usize) -> Self {
         ISOLATE.call_once(|| {
-            let home = std::env::temp_dir().join(format!("hkgm-state-{}", std::process::id()));
-            std::env::set_var("HAYAKAGAMI_HOME", home);
+            let home = std::env::temp_dir().join(format!("hikae-state-{}", std::process::id()));
+            std::env::set_var("HIKAE_HOME", home);
         });
         let root = tempfile::tempdir().unwrap();
         let source = root.path().join("source");
@@ -80,7 +80,7 @@ fn tree(root: &Path) -> Vec<(String, Vec<u8>)> {
             let path = entry.unwrap().path();
             if path.is_dir() {
                 walk(root, &path, out);
-            } else if path.file_name().unwrap() != ".hayakagami-state" {
+            } else if path.file_name().unwrap() != ".hikae-state" {
                 let rel = path.strip_prefix(root).unwrap().display().to_string();
                 out.push((rel, fs::read(&path).unwrap()));
             }

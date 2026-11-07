@@ -215,7 +215,7 @@ fn copy_one(plan: &Plan, rel: &Path, created: i64, shared: &Shared) -> io::Resul
     let source = plan.source.join(rel);
     let target = plan.dest.join(rel);
     let id = shared.counter.fetch_add(1, Ordering::Relaxed);
-    let tmp = target.with_file_name(format!(".hkgm{:x}-{id}{TMP_SUFFIX}", std::process::id()));
+    let tmp = target.with_file_name(format!(".hikae{:x}-{id}{TMP_SUFFIX}", std::process::id()));
     let progress = &shared.ctx.progress;
     let copied = platform::copy_file(&source, &tmp, &shared.ctx.cancel, &mut |n| {
         progress.bytes_done.fetch_add(n, Ordering::Relaxed);

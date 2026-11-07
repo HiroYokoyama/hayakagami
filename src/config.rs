@@ -38,8 +38,11 @@ pub struct Pattern {
 }
 
 /// Extension of a pattern saved as its own file.
-pub const PATTERN_EXTENSION: &str = "hkgm";
-const PATTERN_FORMAT: &str = "hayakagami-pattern";
+pub const PATTERN_EXTENSION: &str = "hikae";
+/// Pattern files saved under the earlier name of this program still open.
+pub const LEGACY_PATTERN_EXTENSION: &str = "hkgm";
+const PATTERN_FORMAT: &str = "hikae-pattern";
+const LEGACY_PATTERN_FORMAT: &str = "hayakagami-pattern";
 const PATTERN_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize)]
@@ -100,9 +103,9 @@ fn base_dir(windows_var: &str, mac_sub: &str, xdg_var: &str, xdg_default: &str) 
     }
 }
 
-/// `HAYAKAGAMI_HOME` overrides both directories, keeping tests away from real settings.
+/// `HIKAE_HOME` overrides both directories, keeping tests away from real settings.
 pub fn config_dir() -> PathBuf {
-    if let Some(home) = std::env::var_os("HAYAKAGAMI_HOME") {
+    if let Some(home) = std::env::var_os("HIKAE_HOME") {
         return PathBuf::from(home);
     }
     base_dir(
@@ -111,14 +114,85 @@ pub fn config_dir() -> PathBuf {
         "XDG_CONFIG_HOME",
         ".config",
     )
-    .join("Hayakagami")
+    .join("Hikae")
 }
 
 pub fn cache_dir() -> PathBuf {
-    if let Some(home) = std::env::var_os("HAYAKAGAMI_HOME") {
+    if let Some(home) = std::env::var_os("HIKAE_HOME") {
         return PathBuf::from(home).join("cache");
     }
-    base_dir("LOCALAPPDATA", "Caches", "XDG_CACHE_HOME", ".cache").join("Hayakagami")
+    base_dir("LOCALAPPDATA", "Caches", "XDG_CACHE_HOME", ".cache").join("Hikae")
+}
+
+/// The earlier name of this program, under which settings may still be kept.
+const LEGACY_DIR: &str = "Hayakagami";
+
+/// Whether a path is a pattern file, under the current or the earlier extension.
+pub fn is_pattern_file(path: &Path) -> bool {
+    path.extension().is_some_and(|e| {
+        e.eq_ignore_ascii_case(PATTERN_EXTENSION)
+            || e.eq_ignore_ascii_case(LEGACY_PATTERN_EXTENSION)
+    })
+}
+
+/// Brings settings and saved state over from the earlier name of this program.
+/// Returns what went wrong, for the log. `HIKAE_HOME` keeps this away from real settings.
+pub fn migrate_legacy() -> Vec<String> {
+    if std::env::var_os("HIKAE_HOME").is_some() {
+        return Vec::new();
+    }
+    let old_config = base_dir(
+        "APPDATA",
+        "Application Support",
+        "XDG_CONFIG_HOME",
+        ".config",
+    )
+    .join(LEGACY_DIR);
+    let old_cache = base_dir("LOCALAPPDATA", "Caches", "XDG_CACHE_HOME", ".cache").join(LEGACY_DIR);
+    migrate_folders(&old_config, &config_dir(), &old_cache, &cache_dir())
+}
+
+/// Copies the patterns and moves the saved state, unless the new place already has them.
+/// The old patterns stay as they are, so nothing can be lost here. The saved state is
+/// moved because it can be large, and failing to move it only causes a full check.
+pub fn migrate_folders(
+    old_config: &Path,
+    new_config: &Path,
+    old_cache: &Path,
+    new_cache: &Path,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    let old_patterns = old_config.join("patterns.json");
+    let new_patterns = new_config.join("patterns.json");
+    if old_patterns.is_file() && !new_patterns.exists() {
+        let copied = fs::create_dir_all(new_config)
+            .and_then(|()| {
+                let tmp = new_patterns.with_extension("json.tmp");
+                fs::copy(&old_patterns, &tmp)?;
+                fs::rename(&tmp, &new_patterns)
+            })
+            .map_err(|e| {
+                crate::trf!(
+                    "Could not bring the patterns over from {}: {e}",
+                    "{} からパターンを引き継げませんでした: {e}",
+                    old_patterns.display()
+                )
+            });
+        problems.extend(copied.err());
+    }
+    if old_cache.is_dir() && !new_cache.exists() {
+        let moved = new_cache
+            .parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| fs::rename(old_cache, new_cache));
+        if let Err(e) = moved {
+            problems.push(crate::trf!(
+                "Could not bring the saved state over, so the next run is a full check: {e}",
+                "保存した記録を引き継げなかったため、次回はフルチェックになります: {e}"
+            ));
+        }
+    }
+    problems
 }
 
 pub fn config_path() -> PathBuf {
@@ -185,7 +259,7 @@ pub fn load_pattern_file(path: &Path) -> Result<Pattern, String> {
             path.display()
         )
     })?;
-    if file.format != PATTERN_FORMAT {
+    if file.format != PATTERN_FORMAT && file.format != LEGACY_PATTERN_FORMAT {
         return Err(crate::trf!(
             "{} is not a pattern file",
             "{} はパターンファイルではありません",
@@ -194,8 +268,8 @@ pub fn load_pattern_file(path: &Path) -> Result<Pattern, String> {
     }
     if file.version > PATTERN_VERSION {
         return Err(crate::trf!(
-            "{} needs a newer version of Hayakagami",
-            "{} を開くには新しいバージョンのHayakagamiが必要です",
+            "{} needs a newer version of Hikae",
+            "{} を開くには新しいバージョンのHikaeが必要です",
             path.display()
         ));
     }
@@ -210,7 +284,7 @@ pub fn save_pattern_file(path: &Path, pattern: &Pattern) -> Result<(), String> {
     };
     let run = || -> std::io::Result<()> {
         let text = serde_json::to_string_pretty(&file)?;
-        let tmp = path.with_extension("hkgm.tmp");
+        let tmp = path.with_extension("hikae.tmp");
         fs::write(&tmp, text)?;
         fs::rename(&tmp, path)
     };
@@ -238,7 +312,7 @@ mod tests {
     #[test]
     fn pattern_file_round_trip() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.hkgm");
+        let path = dir.path().join("a.hikae");
         let mut pattern = Pattern::new("日本語");
         pattern.excludes.push("*.tmp".into());
         pattern.pairs[0].source = r"D:\\from".into();
@@ -252,14 +326,14 @@ mod tests {
     #[test]
     fn other_json_is_not_a_pattern_file() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.hkgm");
+        let path = dir.path().join("a.hikae");
         fs::write(&path, r#"{"name":"x"}"#).unwrap();
         assert!(load_pattern_file(&path).is_err());
         fs::write(&path, r#"{"format":"other","version":1,"name":"x"}"#).unwrap();
         assert!(load_pattern_file(&path).is_err());
         fs::write(
             &path,
-            r#"{"format":"hayakagami-pattern","version":99,"name":"x"}"#,
+            r#"{"format":"hikae-pattern","version":99,"name":"x"}"#,
         )
         .unwrap();
         assert!(load_pattern_file(&path).is_err());

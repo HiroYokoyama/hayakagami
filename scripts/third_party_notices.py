@@ -82,7 +82,7 @@ def main():
         raise SystemExit(f"crates without a license field: {', '.join(unlicensed)}")
 
     parts = [
-        "Hayakagami is built with the following crates. Where a crate offers a choice",
+        "Hikae is built with the following crates. Where a crate offers a choice",
         "of licenses, every license it ships is reproduced here. A crate that ships no",
         "license text uses a license whose text appears under other crates in this file.",
         "",

@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security problem or data loss
-    url: https://github.com/HiroYokoyama/hayakagami/security/advisories/new
+    url: https://github.com/HiroYokoyama/hikae/security/advisories/new
     about: Report privately if others could be harmed before it is fixed.
