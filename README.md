@@ -25,6 +25,22 @@ It is built for the common case where almost nothing changed, yet a backup still
 - **It lists folders in bulk.** On Windows, sizes and dates come from one listing per folder, without opening each file.
 - **It adapts to the disk.** Hard disks get few threads, while SSDs and network shares get more. A disk that cannot be identified is treated as a hard disk.
 
+## Benchmark
+
+Time to compare 100,000 files in 2,000 folders when nothing changed, in seconds. Each figure is the median of 5 runs on a GitHub Actions runner, with the file cache warm.
+
+| | Windows | macOS | Linux |
+|---|---:|---:|---:|
+| Hayakagami, saved state | 0.178 | 0.213 | 0.182 |
+| Hayakagami, saved state and `--usn` | 0.198 | - | - |
+| Hayakagami, `--full` | 0.261 | 1.083 | 0.219 |
+| robocopy `/MIR /L` | 0.416 | - | - |
+| rsync `-a --delete --dry-run` | - | 6.231 | 0.781 |
+
+With the file cache empty, which is possible only on the Linux runner, the saved state took 0.638 s, `--full` 0.741 s and rsync 2.493 s.
+
+These runners have fast disks and a warm cache, so the time a hard disk spends seeking does not appear here, and the change journal shows no gain. Results on your own disks will differ. To repeat this, run the `Benchmark` workflow.
+
 ## The NTFS change journal (optional)
 
 On Windows, turn on **Use the NTFS change journal** under **Advanced** (`--usn` on the command line) to skip the source folders that did not change. It is off by default.
