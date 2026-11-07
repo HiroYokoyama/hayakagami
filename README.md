@@ -25,6 +25,16 @@ It is built for the common case where almost nothing changed, yet a backup still
 - **It lists folders in bulk.** On Windows, sizes and dates come from one listing per folder, without opening each file.
 - **It adapts to the disk.** Hard disks get few threads, while SSDs and network shares get more. A disk that cannot be identified is treated as a hard disk.
 
+## The NTFS change journal (optional)
+
+On Windows, turn on **Use the NTFS change journal** under **Advanced** (`--usn` on the command line) to skip the source folders that did not change. It is off by default.
+
+- Most drives need administrator rights to read the journal. Windows asks for permission once per window: when a pattern file is opened, or at the first preview or run otherwise. The rights are used only to read the journal, by a small helper process. Copying and deleting never run with them.
+- If you decline, or on the command line without those rights, the source is listed as usual.
+- The source is also listed as usual when the journal was recreated, no longer reaches back to the last run, or names too many changed folders, and at every full check.
+- Changes made while the drive was attached to another operating system may not be recorded. Run a full check after that.
+- Volumes without a journal are not set up for you yet.
+
 ## When the saved state is not trusted
 
 Hayakagami reads the whole destination (a full check) when:
@@ -89,6 +99,7 @@ hayakagami mirror <source> <destination> --exclude "*.tmp" --dry-run
 | `--dry-run` | Compare only and change nothing |
 | `--full` | Read the destination from disk instead of the saved state |
 | `--allow-delete` | Carry out changes that a safety check stopped |
+| `--usn` | Use the NTFS change journal (Windows) |
 | `--scan-threads N` / `--copy-threads N` | Set the number of threads |
 | `--lang ja` | Choose the message language |
 | `-v` | List every change |
@@ -117,7 +128,7 @@ Files are compared by size and modification time, not by content. On Windows, ti
 - A change that keeps both the size and the modification time is not detected.
 - A rename that only changes letter case is not applied to the destination on Windows and macOS.
 - Folder modification times and access control lists are not copied. Extended attributes are not copied on macOS and Linux.
-- The source is read on every run.
+- The source is read on every run, unless the change journal is in use.
 
 ## Building
 
