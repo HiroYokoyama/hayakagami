@@ -516,6 +516,7 @@ impl App {
                     .chain(&pair.excludes)
                     .cloned()
                     .collect(),
+                expected_disk: pair.dest_disk.clone(),
             });
         }
         if specs.is_empty() {
@@ -1009,6 +1010,11 @@ impl App {
                                 }
                             });
                         });
+                    }
+                    ui.add_space(6.0);
+                    section_title(ui, tr("DESTINATION DISK CHECK", "保存先ディスクの確認"));
+                    for (i, pair) in pattern.pairs.iter_mut().enumerate() {
+                        changed |= disk_check_row(ui, i, pair, &mut self.log);
                     }
                 });
         });
@@ -1513,6 +1519,59 @@ fn folder_table(ui: &mut egui::Ui, pairs: &mut Vec<FolderPair>) -> bool {
         changed = true;
     }
     changed
+}
+
+/// Ticking remembers the disk connected now. A run then stops on any other disk.
+fn disk_check_row(
+    ui: &mut egui::Ui,
+    index: usize,
+    pair: &mut FolderPair,
+    log: &mut Vec<String>,
+) -> bool {
+    let number = index + 1;
+    let mut checked = pair.dest_disk.is_some();
+    let label = match &pair.dest_disk {
+        Some(disk) => trf!(
+            "Pair {number}: run only on {disk}",
+            "{number} 組目: {disk} のときだけ実行する"
+        ),
+        None => trf!(
+            "Pair {number}: run only on the disk connected now",
+            "{number} 組目: いま接続中のディスクのときだけ実行する"
+        ),
+    };
+    let clicked = ui
+        .push_id(("disk-check", index), |ui| {
+            ui.checkbox(&mut checked, label)
+                .on_hover_text(tr(
+                    "Identifies the disk by its name and ID. Formatting a disk changes its ID. To accept a new disk, turn this off and on again.",
+                    "ディスクを名前とIDで見分けます。フォーマットするとIDが変わります。新しいディスクにするときは、オフにしてからオンにし直してください",
+                ))
+                .changed()
+        })
+        .inner;
+    if !clicked {
+        return false;
+    }
+    if !checked {
+        pair.dest_disk = None;
+        return true;
+    }
+    if pair.dest.trim().is_empty() {
+        log.push(trf!(
+            "Pair {number}: choose a destination first.",
+            "{number} 組目: 先に保存先を指定してください"
+        ));
+        return false;
+    }
+    pair.dest_disk = plan::disk_of(Path::new(pair.dest.trim()));
+    if pair.dest_disk.is_none() {
+        log.push(trf!(
+            "Pair {number}: the destination disk could not be identified. Check that it is connected.",
+            "{number} 組目: 保存先のディスクを確認できませんでした。接続を確認してください"
+        ));
+    }
+    pair.dest_disk.is_some()
 }
 
 fn path_field(

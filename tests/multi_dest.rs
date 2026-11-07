@@ -48,6 +48,7 @@ impl Fixture {
             source: self.source.clone(),
             dest: dest.to_path_buf(),
             excludes: Vec::new(),
+            expected_disk: None,
         };
         plan::scan(&spec, &options, &RunContext::silent()).unwrap()
     }

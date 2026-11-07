@@ -942,6 +942,40 @@ fn usable_cache(
     Ok(loaded)
 }
 
+/// The path itself, or the closest parent folder that exists.
+fn nearest_existing(path: &Path) -> PathBuf {
+    let mut probe = path;
+    while !probe.exists() {
+        match probe.parent() {
+            Some(parent) => probe = parent,
+            None => break,
+        }
+    }
+    probe.to_path_buf()
+}
+
+/// The disk a destination is on, or would be on once it is created.
+pub fn disk_of(dest: &Path) -> Option<DiskIdentity> {
+    let dest = resolve_dest(dest).ok()?;
+    platform::disk_identity(&nearest_existing(&dest))
+}
+
+fn check_disk(expected: &DiskIdentity, dest_probe: &Path) -> Result<(), MirrorError> {
+    let Some(found) = platform::disk_identity(dest_probe) else {
+        return Err(MirrorError::Guard(trf!(
+            "The expected destination disk {expected} is not connected. Nothing was changed.",
+            "保存先のディスク {expected} が接続されていません。何も変更していません"
+        )));
+    };
+    if expected.same_disk(&found) {
+        return Ok(());
+    }
+    Err(MirrorError::Guard(trf!(
+        "The destination is on another disk: expected {expected}, found {found}. Nothing was changed. If the disk was replaced on purpose, turn its disk check off and on again under Advanced.",
+        "保存先が別のディスクです: 想定 {expected}、接続中 {found}。何も変更していません。意図して交換した場合は、詳細設定のディスク確認をオフにしてからオンにし直してください"
+    )))
+}
+
 /// Scans one folder pair. Nothing on disk changes.
 pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<Plan, MirrorError> {
     ctx.progress.set_phase(Phase::Scanning);
@@ -978,16 +1012,10 @@ pub fn scan(spec: &PairSpec, options: &ScanOptions, ctx: &RunContext) -> Result<
     }
     let excludes = Excludes::new(&spec.excludes).map_err(MirrorError::Fatal)?;
 
-    let dest_probe = {
-        let mut probe = dest.as_path();
-        while !probe.exists() {
-            match probe.parent() {
-                Some(parent) => probe = parent,
-                None => break,
-            }
-        }
-        probe.to_path_buf()
-    };
+    let dest_probe = nearest_existing(&dest);
+    if let Some(expected) = &spec.expected_disk {
+        check_disk(expected, &dest_probe)?;
+    }
     let source_disk = platform::disk_kind(&source);
     let dest_disk = platform::disk_kind(&dest_probe);
     let source_threads = options

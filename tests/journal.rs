@@ -61,6 +61,7 @@ impl Fixture {
             source: self.source.clone(),
             dest: self.dest.clone(),
             excludes: Vec::new(),
+            expected_disk: None,
         };
         plan::scan(&spec, &options, &RunContext::silent()).unwrap()
     }
@@ -301,6 +302,7 @@ fn turning_the_journal_off_lists_everything() {
         source: f.source.clone(),
         dest: f.dest.clone(),
         excludes: Vec::new(),
+        expected_disk: None,
     };
     let plan = plan::scan(&spec, &ScanOptions::default(), &RunContext::silent()).unwrap();
     assert_eq!(plan.source_scan, SourceScan::Disk);

@@ -41,6 +41,7 @@ impl Fixture {
             source: self.source.clone(),
             dest: self.dest.clone(),
             excludes: self.excludes.clone(),
+            expected_disk: None,
         }
     }
 
@@ -221,6 +222,7 @@ fn overlapping_folders_are_refused() {
             source: f.source.clone(),
             dest,
             excludes: Vec::new(),
+            expected_disk: None,
         };
         let result = plan::scan(&spec, &ScanOptions::default(), &RunContext::silent());
         assert!(matches!(result, Err(MirrorError::Guard(_))));
@@ -229,6 +231,7 @@ fn overlapping_folders_are_refused() {
         source: f.source.join("missing"),
         dest: f.dest.clone(),
         excludes: Vec::new(),
+        expected_disk: None,
     };
     assert!(plan::scan(&spec, &ScanOptions::default(), &RunContext::silent()).is_err());
 }

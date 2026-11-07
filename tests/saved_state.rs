@@ -47,6 +47,7 @@ impl Fixture {
             source: self.source.clone(),
             dest: self.dest.clone(),
             excludes: Vec::new(),
+            expected_disk: None,
         };
         let options = ScanOptions {
             force_full,

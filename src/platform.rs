@@ -605,6 +605,36 @@ mod windows_impl {
         ))
     }
 
+    /// The volume label and serial number. The serial changes when a disk is formatted.
+    pub fn disk_identity(path: &Path) -> Option<crate::model::DiskIdentity> {
+        let root = volume_root(path)?;
+        let mut serial = 0u32;
+        let mut label = [0u16; 261];
+        let ok = unsafe {
+            GetVolumeInformationW(
+                root.as_ptr(),
+                label.as_mut_ptr(),
+                label.len() as u32,
+                &mut serial,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if ok == 0 {
+            return None;
+        }
+        let len = label.iter().position(|c| *c == 0).unwrap_or(label.len());
+        let name = String::from_utf16_lossy(&label[..len]);
+        let id = if serial == 0 {
+            String::new()
+        } else {
+            format!("{serial:08X}")
+        };
+        (!name.is_empty() || !id.is_empty()).then_some(crate::model::DiskIdentity { name, id })
+    }
+
     /// Time difference accepted as equal. FAT family disks round timestamps.
     pub fn mtime_tolerance(path: &Path) -> i64 {
         match volume_info(path) {
@@ -776,6 +806,30 @@ mod unix_impl {
     pub fn volume_info(path: &Path) -> Option<(String, String)> {
         let meta = fs::metadata(path).ok()?;
         Some((format!("{:x}", meta.dev()), String::new()))
+    }
+
+    /// The name of the mount point, plus the file system UUID where the system lists
+    /// one (Linux). The device number is not used, as it changes between connections.
+    pub fn disk_identity(path: &Path) -> Option<crate::model::DiskIdentity> {
+        let path = path.canonicalize().ok()?;
+        let device = fs::metadata(&path).ok()?.dev();
+        let mount = path
+            .ancestors()
+            .take_while(|p| fs::metadata(p).is_ok_and(|m| m.dev() == device))
+            .last()?;
+        let name = mount.file_name().map_or_else(
+            || mount.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let id = fs::read_dir("/dev/disk/by-uuid")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .find(|link| fs::metadata(link.path()).is_ok_and(|m| m.rdev() == device))
+            .map_or(String::new(), |link| {
+                link.file_name().to_string_lossy().into_owned()
+            });
+        Some(crate::model::DiskIdentity { name, id })
     }
 
     /// The file system type is not checked here, so the coarsest common

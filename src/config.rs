@@ -1,5 +1,6 @@
 //! Saved patterns: named sets of folder pairs and exclusions.
 
+use crate::model::DiskIdentity;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,9 @@ pub struct FolderPair {
     /// Exclusions for this pair, added to the pattern's list.
     #[serde(default)]
     pub excludes: Vec<String>,
+    /// When set, a run stops unless the destination is on this disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dest_disk: Option<DiskIdentity>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

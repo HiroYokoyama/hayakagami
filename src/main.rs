@@ -224,6 +224,7 @@ fn specs_from(pairs: &[FolderPair], common: &[String]) -> Vec<PairSpec> {
             source: PathBuf::from(&p.source),
             dest: PathBuf::from(&p.dest),
             excludes: common.iter().chain(&p.excludes).cloned().collect(),
+            expected_disk: p.dest_disk.clone(),
         })
         .collect()
 }
@@ -273,6 +274,7 @@ fn main() -> ExitCode {
                 source,
                 dest,
                 excludes,
+                expected_disk: None,
             }],
             &flags,
             30,

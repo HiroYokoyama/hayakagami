@@ -40,12 +40,42 @@ pub struct Entry {
     pub attrs: u32,
 }
 
+/// What tells one disk from another: its name, and an ID where the system has one.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DiskIdentity {
+    pub name: String,
+    pub id: String,
+}
+
+impl DiskIdentity {
+    /// The ID decides when both sides have one, since a name can be changed or repeated.
+    pub fn same_disk(&self, other: &Self) -> bool {
+        if self.id.is_empty() || other.id.is_empty() {
+            !self.name.is_empty() && self.name == other.name
+        } else {
+            self.id == other.id
+        }
+    }
+}
+
+impl std::fmt::Display for DiskIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.name.is_empty(), self.id.is_empty()) {
+            (false, false) => write!(f, "{} ({})", self.name, self.id),
+            (true, false) => f.write_str(&self.id),
+            _ => f.write_str(&self.name),
+        }
+    }
+}
+
 /// One source-to-destination folder mirror.
 #[derive(Clone, Debug)]
 pub struct PairSpec {
     pub source: PathBuf,
     pub dest: PathBuf,
     pub excludes: Vec<String>,
+    /// Refuse to run unless the destination is on this disk.
+    pub expected_disk: Option<DiskIdentity>,
 }
 
 #[derive(Clone, Debug)]

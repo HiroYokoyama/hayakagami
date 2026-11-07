@@ -1,7 +1,7 @@
 //! The overwrite safety check and flushed copies, on temporary folders only.
 
 use hayakagami::exec;
-use hayakagami::model::{MirrorError, PairSpec, RunContext, ScanOptions};
+use hayakagami::model::{DiskIdentity, MirrorError, PairSpec, RunContext, ScanOptions};
 use hayakagami::plan::{self, Plan};
 use std::fs;
 use std::path::PathBuf;
@@ -44,6 +44,7 @@ impl Fixture {
             source: self.source.clone(),
             dest: self.dest.clone(),
             excludes: Vec::new(),
+            expected_disk: None,
         };
         plan::scan(&spec, &ScanOptions::default(), &RunContext::silent()).unwrap()
     }
@@ -123,4 +124,56 @@ fn a_readonly_file_is_copied_and_stays_readonly() {
     let copied = f.dest.join("readonly.txt");
     assert_eq!(fs::read_to_string(&copied).unwrap(), "readonly");
     assert!(fs::metadata(&copied).unwrap().permissions().readonly());
+}
+
+fn wrong_disk() -> DiskIdentity {
+    DiskIdentity {
+        name: "not this disk".into(),
+        id: "not this id".into(),
+    }
+}
+
+fn scan_expecting(f: &Fixture, disk: DiskIdentity) -> Result<Plan, MirrorError> {
+    let spec = PairSpec {
+        source: f.source.clone(),
+        dest: f.dest.clone(),
+        excludes: Vec::new(),
+        expected_disk: Some(disk),
+    };
+    plan::scan(&spec, &ScanOptions::default(), &RunContext::silent())
+}
+
+#[test]
+fn another_disk_stops_before_anything_is_listed() {
+    let f = Fixture::seeded(1);
+    match scan_expecting(&f, wrong_disk()) {
+        Err(MirrorError::Guard(message)) => assert!(message.contains("not this disk")),
+        other => panic!("expected a guard, got {:?}", other.map(|_| "a plan")),
+    }
+}
+
+#[test]
+fn the_remembered_disk_is_accepted() {
+    let f = Fixture::seeded(1);
+    let disk = plan::disk_of(&f.dest).expect("a temporary folder is on a known disk");
+    assert!(scan_expecting(&f, disk).is_ok());
+}
+
+#[test]
+fn a_destination_not_created_yet_is_on_the_disk_of_its_parent() {
+    let f = Fixture::seeded(1);
+    let disk = plan::disk_of(&f.dest).unwrap();
+    assert_eq!(plan::disk_of(&f.dest.join("not/created/yet")), Some(disk));
+}
+
+#[test]
+fn the_id_decides_when_both_disks_have_one() {
+    let disk = |name: &str, id: &str| DiskIdentity {
+        name: name.into(),
+        id: id.into(),
+    };
+    assert!(disk("renamed", "1").same_disk(&disk("backup", "1")));
+    assert!(!disk("backup", "1").same_disk(&disk("backup", "2")));
+    assert!(disk("backup", "").same_disk(&disk("backup", "1")));
+    assert!(!disk("", "").same_disk(&disk("", "")));
 }
