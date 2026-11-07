@@ -152,6 +152,31 @@ fn every_item_is_updated_and_counted() {
 }
 
 #[test]
+fn the_overall_bar_follows_the_pairs_and_ends_full() {
+    let f = Fixture::new();
+    let ctx = RunContext::silent();
+    assert_eq!(ctx.progress.overall_fraction(), None);
+
+    let plan = f.scan(false);
+    let units = plan.work_units();
+    assert!(units > 0);
+    ctx.progress.begin_run(2, units * 2);
+    ctx.progress.next_pair(units);
+    assert_eq!(ctx.progress.overall_fraction(), Some(0.0));
+    exec::execute(plan, &ctx, true).unwrap();
+    assert_eq!(ctx.progress.overall_fraction(), Some(0.5));
+
+    ctx.progress.next_pair(units);
+    assert_eq!(ctx.progress.pair.load(Ordering::Relaxed), 2);
+    assert_eq!(ctx.progress.overall_fraction(), Some(0.5));
+    ctx.progress
+        .files_done
+        .store(units * 100, Ordering::Relaxed);
+    // Never more than the pair's own share, and never past the end.
+    assert_eq!(ctx.progress.overall_fraction(), Some(1.0));
+}
+
+#[test]
 fn a_cancelled_run_stops_updating() {
     let f = Fixture::new();
     f.run();

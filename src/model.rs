@@ -107,6 +107,12 @@ pub enum Phase {
     Metadata = 4,
 }
 
+/// Combines different kinds of work into one number for the overall bar. On a hard
+/// disk, a small operation and a mebibyte of copying take roughly alike.
+pub fn work_units(files: u64, bytes: u64, small_operations: u64) -> u64 {
+    files + bytes / (1024 * 1024) + small_operations
+}
+
 /// Counters read by the UI while a job runs.
 #[derive(Default)]
 pub struct Progress {
@@ -122,6 +128,13 @@ pub struct Progress {
     pub metadata_total: AtomicU64,
     pub metadata_done: AtomicU64,
     pub errors: AtomicU64,
+    /// Which pair of how many is being worked on, counted from 1.
+    pub pair: AtomicU64,
+    pub pairs: AtomicU64,
+    /// Work across all the pairs of a run. `reset` leaves these alone.
+    pub run_units: AtomicU64,
+    pub finished_units: AtomicU64,
+    pub pair_units: AtomicU64,
 }
 
 impl Progress {
@@ -137,6 +150,43 @@ impl Progress {
             4 => Phase::Metadata,
             _ => Phase::Idle,
         }
+    }
+
+    /// Starts the bar for a whole run, once the work of every pair is known.
+    pub fn begin_run(&self, pairs: u64, units: u64) {
+        self.pair.store(0, Ordering::Relaxed);
+        self.pairs.store(pairs, Ordering::Relaxed);
+        self.run_units.store(units, Ordering::Relaxed);
+        self.finished_units.store(0, Ordering::Relaxed);
+        self.pair_units.store(0, Ordering::Relaxed);
+    }
+
+    /// Moves on to the next pair. The one before counts as finished in full, even
+    /// where some of it failed, so that the bar reaches its end.
+    pub fn next_pair(&self, units: u64) {
+        let previous = self.pair_units.swap(units, Ordering::Relaxed);
+        self.finished_units.fetch_add(previous, Ordering::Relaxed);
+        self.pair.fetch_add(1, Ordering::Relaxed);
+        self.reset();
+    }
+
+    /// How much of the run is done from 0 to 1, or nothing before it is known.
+    ///
+    /// A rough measure of the work, not of the time: see [`work_units`].
+    pub fn overall_fraction(&self) -> Option<f32> {
+        let total = self.run_units.load(Ordering::Relaxed);
+        if total == 0 {
+            return None;
+        }
+        let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
+        let done = work_units(
+            load(&self.files_done),
+            load(&self.bytes_done),
+            load(&self.deletes_done) + load(&self.metadata_done),
+        )
+        .min(load(&self.pair_units));
+        let finished = load(&self.finished_units) + done;
+        Some((finished as f32 / total as f32).min(1.0))
     }
 
     /// Clears the counters so one progress display can follow several pairs.

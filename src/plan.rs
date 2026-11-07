@@ -116,6 +116,15 @@ impl Plan {
         self.delete_files.len() + self.conflict_files.len()
     }
 
+    /// This plan's share of the overall progress bar.
+    pub fn work_units(&self) -> u64 {
+        crate::model::work_units(
+            self.copies.len() as u64,
+            self.stats.copy_bytes,
+            (self.delete_count() + self.metadata.len() + self.restore_dirs.len()) as u64,
+        )
+    }
+
     pub fn has_work(&self) -> bool {
         !(self.copies.is_empty()
             && self.mkdirs.is_empty()

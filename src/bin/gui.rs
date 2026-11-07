@@ -79,6 +79,7 @@ struct App {
     selected: usize,
     excludes_text: String,
     dirty_since: Option<Instant>,
+    job_started: Instant,
     full_check: bool,
     allow_guarded: bool,
     plans: Option<Vec<Plan>>,
@@ -212,6 +213,17 @@ fn tile(ui: &mut egui::Ui, label: &str, value: String, detail: Option<String>, c
     });
 }
 
+fn format_elapsed(seconds: u64) -> String {
+    let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    if hours > 0 {
+        trf!("{hours} h {minutes} min", "{hours}時間{minutes}分")
+    } else if minutes > 0 {
+        trf!("{minutes} min {seconds} s", "{minutes}分{seconds}秒")
+    } else {
+        trf!("{seconds} s", "{seconds}秒")
+    }
+}
+
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -283,8 +295,9 @@ fn scan_all(
     tx: &Sender<Message>,
 ) -> Option<Vec<Plan>> {
     let mut plans = Vec::with_capacity(specs.len());
+    ctx.progress.begin_run(specs.len() as u64, 0);
     for spec in specs {
-        ctx.progress.reset();
+        ctx.progress.next_pair(0);
         let started = Instant::now();
         match plan::scan(spec, options, ctx) {
             Ok(plan) => {
@@ -327,7 +340,10 @@ fn scan_all(
 }
 
 fn execute_all(plans: Vec<Plan>, allow: bool, ctx: &RunContext, tx: &Sender<Message>) {
+    let units = plans.iter().map(Plan::work_units).sum();
+    ctx.progress.begin_run(plans.len() as u64, units);
     for plan in plans {
+        ctx.progress.next_pair(plan.work_units());
         let label = pair_label(&plan);
         let started = Instant::now();
         match exec::execute(plan, ctx, allow) {
@@ -387,6 +403,7 @@ impl App {
             selected: 0,
             excludes_text: String::new(),
             dirty_since: None,
+            job_started: Instant::now(),
             full_check: false,
             allow_guarded: false,
             plans: None,
@@ -534,6 +551,7 @@ impl App {
             done_ui.request_repaint();
         });
         self.job = Some((ctx, rx));
+        self.job_started = Instant::now();
     }
 
     fn start_preview(&mut self, ui_ctx: &egui::Context) {
@@ -1175,6 +1193,7 @@ impl App {
             .as_ref()
             .is_some_and(|plans| !plans.iter().any(Plan::has_work));
         let on_run_tab = self.tab == Tab::Run;
+        self.overall_bar(ui);
         let bar = egui::vec2(ui.available_width(), 34.0);
         ui.allocate_ui_with_layout(
             bar,
@@ -1236,6 +1255,43 @@ impl App {
             },
         );
         ui.add_space(6.0);
+    }
+
+    /// The whole run at a glance: the row below shows the current step.
+    fn overall_bar(&self, ui: &mut egui::Ui) {
+        let Some((ctx, _)) = &self.job else {
+            return;
+        };
+        let p = &ctx.progress;
+        let (pair, pairs) = (
+            p.pair.load(Ordering::Relaxed),
+            p.pairs.load(Ordering::Relaxed),
+        );
+        let elapsed = format_elapsed(self.job_started.elapsed().as_secs());
+        let where_in_run = if pairs > 1 {
+            trf!(
+                "folder pair {pair} of {pairs}, {elapsed}",
+                "フォルダペア {pair} / {pairs}、{elapsed}"
+            )
+        } else {
+            elapsed
+        };
+        ui.add_space(6.0);
+        let bar = match p.overall_fraction() {
+            Some(fraction) => {
+                let percent = (fraction * 100.0) as u32;
+                egui::ProgressBar::new(fraction).text(trf!(
+                    "Overall {percent}% ({where_in_run})",
+                    "全体 {percent}%({where_in_run})"
+                ))
+            }
+            // How much there is to do is not known until the comparison ends.
+            None => egui::ProgressBar::new(0.0).animate(true).text(trf!(
+                "Comparing before starting ({where_in_run})",
+                "開始前の比較中({where_in_run})"
+            )),
+        };
+        ui.add(bar);
     }
 
     fn status_line(&self, ui: &mut egui::Ui) {
