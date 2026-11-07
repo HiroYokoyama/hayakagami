@@ -9,12 +9,6 @@ on:
       per_folder:
         description: Files per folder
         default: "50"
-  push:
-    branches: [main]
-    paths:
-      - "src/**"
-      - "scripts/bench.py"
-      - ".github/workflows/benchmark.yml"
 
 permissions:
   contents: read
