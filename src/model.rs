@@ -1,0 +1,192 @@
+//! Types shared by the scanner, planner and executor.
+
+use std::ffi::{OsStr, OsString};
+use std::fmt;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::Arc;
+
+/// Reserved file in the destination root that ties it to a cache generation.
+pub const MARKER_NAME: &str = ".hayakagami-state";
+/// Suffix of in-flight copies. Leftovers are removed by the next full scan.
+pub const TMP_SUFFIX: &str = ".hkgmtmp";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    File,
+    Dir,
+    /// Symlink or similar that must not be followed.
+    Link,
+    /// A link that the OS removes as a directory (Windows junction).
+    DirLink,
+}
+
+impl Kind {
+    pub fn is_link(self) -> bool {
+        matches!(self, Kind::Link | Kind::DirLink)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Entry {
+    pub name: OsString,
+    pub kind: Kind,
+    pub size: u64,
+    /// Last modification, in 100 ns units since the Unix epoch.
+    pub mtime: i64,
+}
+
+/// One source-to-destination folder mirror.
+#[derive(Clone, Debug)]
+pub struct PairSpec {
+    pub source: PathBuf,
+    pub dest: PathBuf,
+    pub excludes: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ScanOptions {
+    /// Ignore the cache and list the destination.
+    pub force_full: bool,
+    /// Force a full scan when the last one is older than this. 0 disables the cache.
+    pub full_check_days: u32,
+    pub scan_threads: Option<usize>,
+    pub copy_threads: Option<usize>,
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self {
+            force_full: false,
+            full_check_days: 30,
+            scan_threads: None,
+            copy_threads: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum MirrorError {
+    /// A safety check refused to continue.
+    Guard(String),
+    Cancelled,
+    Fatal(String),
+}
+
+impl fmt::Display for MirrorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MirrorError::Guard(m) | MirrorError::Fatal(m) => f.write_str(m),
+            MirrorError::Cancelled => f.write_str("中止しました"),
+        }
+    }
+}
+
+impl std::error::Error for MirrorError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Phase {
+    Idle = 0,
+    Scanning = 1,
+    Copying = 2,
+    Deleting = 3,
+}
+
+/// Counters read by the UI while a job runs.
+#[derive(Default)]
+pub struct Progress {
+    phase: AtomicU8,
+    pub source_entries: AtomicU64,
+    pub dest_entries: AtomicU64,
+    pub files_total: AtomicU64,
+    pub files_done: AtomicU64,
+    pub bytes_total: AtomicU64,
+    pub bytes_done: AtomicU64,
+    pub deletes_total: AtomicU64,
+    pub deletes_done: AtomicU64,
+    pub errors: AtomicU64,
+}
+
+impl Progress {
+    pub fn set_phase(&self, phase: Phase) {
+        self.phase.store(phase as u8, Ordering::Relaxed);
+    }
+
+    pub fn phase(&self) -> Phase {
+        match self.phase.load(Ordering::Relaxed) {
+            1 => Phase::Scanning,
+            2 => Phase::Copying,
+            3 => Phase::Deleting,
+            _ => Phase::Idle,
+        }
+    }
+
+    /// Clears the counters so one progress display can follow several pairs.
+    pub fn reset(&self) {
+        for c in [
+            &self.source_entries,
+            &self.dest_entries,
+            &self.files_total,
+            &self.files_done,
+            &self.bytes_total,
+            &self.bytes_done,
+            &self.deletes_total,
+            &self.deletes_done,
+            &self.errors,
+        ] {
+            c.store(0, Ordering::Relaxed);
+        }
+    }
+}
+
+pub type LogFn = Arc<dyn Fn(String) + Send + Sync>;
+
+#[derive(Clone)]
+pub struct RunContext {
+    pub cancel: Arc<AtomicBool>,
+    pub progress: Arc<Progress>,
+    pub log: LogFn,
+}
+
+impl RunContext {
+    pub fn new(log: LogFn) -> Self {
+        Self {
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress: Arc::new(Progress::default()),
+            log,
+        }
+    }
+
+    pub fn silent() -> Self {
+        Self::new(Arc::new(|_| {}))
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    pub fn log(&self, message: impl Into<String>) {
+        (self.log)(message.into());
+    }
+}
+
+/// Comparison key for names. It follows the common behaviour of each OS: names
+/// differing only in case are one file on Windows and macOS, and macOS also
+/// treats Unicode normalization forms as equal.
+pub fn name_key(name: &OsStr) -> String {
+    let text = name.to_string_lossy();
+    #[cfg(target_os = "macos")]
+    {
+        use unicode_normalization::UnicodeNormalization;
+        text.nfc().collect::<String>().to_lowercase()
+    }
+    #[cfg(windows)]
+    {
+        text.to_lowercase()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        text.into_owned()
+    }
+}
