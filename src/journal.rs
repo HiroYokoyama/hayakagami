@@ -104,6 +104,13 @@ impl Changes {
     }
 }
 
+/// Windows errors meaning a file reference names nothing that exists now:
+/// file not found, path not found, and the invalid parameter that opening a
+/// deleted reference returns.
+pub fn no_such_folder(code: i32) -> bool {
+    matches!(code, 2 | 3 | 87)
+}
+
 /// Comparison key of a relative folder path.
 pub fn rel_key(rel: &Path) -> String {
     let parts: Vec<String> = rel
@@ -462,6 +469,10 @@ mod windows_impl {
                         keys.insert(key);
                     }
                 }
+                // Deleted after the records were read. If it was in the source, its
+                // deletion names its parent next run. Its saved listing cannot hide
+                // a file that still exists, because nothing in it exists any more.
+                Err(e) if e.raw_os_error().is_some_and(no_such_folder) => {}
                 Err(e) => {
                     return Err(ReadFailure {
                         reason: crate::trf!(
@@ -728,6 +739,14 @@ mod tests {
         let mut length = good;
         length[0] = 8;
         assert!(changes.parse(&length).is_err());
+    }
+
+    #[test]
+    fn only_a_missing_folder_is_ignored() {
+        assert!(no_such_folder(87));
+        assert!(no_such_folder(2));
+        assert!(!no_such_folder(5));
+        assert!(!no_such_folder(32));
     }
 
     #[test]
