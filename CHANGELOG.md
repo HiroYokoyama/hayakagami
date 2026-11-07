@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2
+
+### Fixed
+
+- The desktop app no longer draws a spinner over the text while comparing before a run.
+- The two progress bars have the same width.
+
 ## 0.3.1
 
 ### Added
