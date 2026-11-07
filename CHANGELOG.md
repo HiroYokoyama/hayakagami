@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+The first run after updating is a full check, because the saved state has a new format.
+
+### Changed
+
+- Much less writing to the disk holding the saved state. It is now a log: a run adds only what changed, instead of rewriting the whole file. With the change journal, a run that finds nothing adds about 100 bytes, where it used to write about 90 MB per million files.
+
 ## 0.2.1
 
 - Added the license (LGPL-3.0-or-later).

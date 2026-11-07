@@ -69,6 +69,16 @@ Hayakagami reads the whole destination (a full check) when:
 
 While the saved state is in use, **changes made by hand in the destination go unnoticed**. Run a full check after editing the destination yourself.
 
+## Writes to the disk holding the saved state
+
+The saved state is kept small on purpose, so that frequent runs do not wear out an SSD:
+
+- A run with nothing to do writes nothing. With the change journal, it adds about 100 bytes for its new position.
+- A run that changed something adds only the folders that changed. About every time the additions reach half of the file (and at least 256 KB), the file is rewritten as one, so it stays at most about one and a half times its full size.
+- Only a rewrite is forced onto the disk. If a power cut takes the end of the file, Hayakagami goes back to the last good point: it reads the journal again from there, or lists the destination.
+
+Copied files are always forced onto the destination disk, which is a separate matter: it protects your backup, and it applies only to files actually copied.
+
 ## How your data is protected
 
 Hayakagami stops without changing anything, and asks you to review the plan, when:
